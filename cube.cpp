@@ -9,10 +9,7 @@ void print_is_array(PyObject *obj) {
   arrow::py::PyAcquireGIL lock;
   arrow::py::import_pyarrow();
   printf("is_table: %d\n", arrow::py::is_table(obj));
-  std::shared_ptr<arrow::Table> table;
-  arrow::py::unwrap_table(obj, &table);
+  auto table = arrow::py::unwrap_table(obj).ValueOrDie();
+  printf("first field: %s\n", table->schema()->field(0)->name().c_str());
 }
 
-int main() {
-  print_is_array(NULL);
-}
