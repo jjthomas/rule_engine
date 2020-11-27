@@ -14,7 +14,7 @@ extern "C" void compute_stats(PyObject *, int);
 #define DISC_COUNT 15
 
 inline bool not_null(const uint8_t *null_map, int64_t pos) {
- return null_map == nullptr || ((null_map[pos >> 3] >> (pos & 7)) & 1);
+  return null_map == nullptr || ((null_map[pos >> 3] >> (pos & 7)) & 1);
 }
 
 template <typename T>
@@ -36,7 +36,7 @@ bool categorical(const T *data, int64_t len, const uint8_t *null_map, int limit)
 
 template <typename T>
 void enumerate_cat(const T *data, int64_t len, const uint8_t *null_map,
-  uint8_t *result, std::vector<T> &rev_mapping) {
+  std::vector<uint8_t>& result, std::vector<T> &rev_mapping) {
   uint8_t cur_id = 1;
   std::map<T, uint8_t> mapping;
   for (int64_t i = 0; i < len; i++) {
@@ -57,7 +57,7 @@ void enumerate_cat(const T *data, int64_t len, const uint8_t *null_map,
 
 template <typename T>
 std::pair<double, double> discretize_cont(const T *data, int64_t len,
-  const uint8_t *null_map, uint8_t *result) {
+  const uint8_t *null_map, std::vector<uint8_t>& result) {
   int64_t i = 0;
   while (!not_null(null_map, i)) {
     i++;
@@ -92,8 +92,8 @@ void compute_stats(PyObject *obj, int metric_idx) {
   arrow::py::import_pyarrow();
   auto table = arrow::py::unwrap_table(obj).ValueOrDie();
   int64_t num_rows = table->num_rows();
-  std::vector<uint8_t *> cols;
-  uint8_t *metric_col = new uint8_t[num_rows];
+  std::vector<std::vector<uint8_t>> cols;
+  std::vector<uint8_t> metric_col(num_rows);
   std::vector<int> orig_col_idx;
   std::map<int, std::pair<double, double>> min_max;
   std::map<int, std::vector<double>> double_mappings;
@@ -107,16 +107,15 @@ void compute_stats(PyObject *obj, int metric_idx) {
     switch (f->type()->id()) {
       case arrow::Type::type::DOUBLE: {
         auto arr = std::static_pointer_cast<arrow::DoubleArray>(table->column(i)->chunk(0));
-        auto is_cat = categorical(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
+        bool is_cat = categorical(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
           NUM_CARD_LIMIT);
-	uint8_t *col;
-        if (i == metric_idx) {
-          col = metric_col;
-        } else {
-          col = new uint8_t[num_rows];
-          cols.push_back(col);
+        std::vector<uint8_t> *col_ptr = &metric_col;
+        if (i != metric_idx) {
+          cols.push_back(std::vector<uint8_t>(num_rows));
+          col_ptr = &cols.back();
           orig_col_idx.push_back(i);
         }
+        std::vector<uint8_t>& col = *col_ptr;
         if (is_cat) {
           if (i == metric_idx) {
             for (int64_t i = 0; i < arr->length(); i++) {
@@ -134,20 +133,19 @@ void compute_stats(PyObject *obj, int metric_idx) {
           min_max[col_idx] = discretize_cont(arr->raw_values(), arr->length(),
             arr->null_bitmap_data(), col);
         }
-	break;
+        break;
       }
       case arrow::Type::type::INT64: {
         auto arr = std::static_pointer_cast<arrow::Int64Array>(table->column(i)->chunk(0));
-        auto is_cat = categorical(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
+        bool is_cat = categorical(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
           NUM_CARD_LIMIT);
-	uint8_t *col;
-        if (i == metric_idx) {
-          col = metric_col;
-        } else {
-          col = new uint8_t[num_rows];
-          cols.push_back(col);
+        std::vector<uint8_t> *col_ptr = &metric_col;
+        if (i != metric_idx) {
+          cols.push_back(std::vector<uint8_t>(num_rows));
+          col_ptr = &cols.back();
           orig_col_idx.push_back(i);
         }
+        std::vector<uint8_t>& col = *col_ptr;
         if (is_cat) {
           if (i == metric_idx) {
             for (int64_t i = 0; i < arr->length(); i++) {
@@ -165,34 +163,33 @@ void compute_stats(PyObject *obj, int metric_idx) {
           min_max[col_idx] = discretize_cont(arr->raw_values(), arr->length(),
             arr->null_bitmap_data(), col);
         }
-	break;
+        break;
       }
       case arrow::Type::type::STRING: {
         auto arr = std::static_pointer_cast<arrow::StringArray>(table->column(i)->chunk(0));
-	std::string *str_arr = new std::string[arr->length()];
-	for (int64_t j = 0; j < arr->length(); j++) {
+        std::vector<std::string> str_arr(arr->length());
+        for (int64_t j = 0; j < arr->length(); j++) {
           str_arr[j] = arr->GetString(j);
         }
-        auto is_cat = categorical(str_arr, arr->length(), arr->null_bitmap_data(),
+        bool is_cat = categorical(str_arr.data(), arr->length(), arr->null_bitmap_data(),
           STRING_CARD_LIMIT);
         if (is_cat) {
-          uint8_t *col = new uint8_t[num_rows];
-          cols.push_back(col);
+          cols.push_back(std::vector<uint8_t>(num_rows));
+          std::vector<uint8_t>& col = cols.back();
           orig_col_idx.push_back(i);
           std::vector<std::string> mapping;
-          enumerate_cat(str_arr, arr->length(), arr->null_bitmap_data(),
+          enumerate_cat(str_arr.data(), arr->length(), arr->null_bitmap_data(),
             col, mapping);
           string_mappings[col_idx] = std::move(mapping);
         }
-	delete [] str_arr;
-	break;
+        break;
       }
       default:
         printf("  unsupported type for card\n");
     }
   }
 
-  uint32_t global_sum;
+  uint32_t global_sum = 0;
   for (int64_t i = 0; i < num_rows; i++) {
     global_sum += metric_col[i];
   }
@@ -224,9 +221,9 @@ void compute_stats(PyObject *obj, int metric_idx) {
     } else {
       printf(" (%.2f-%.2f):\n", min_max[i].first, min_max[i].second);
     }
-    uint32_t *sums = (uint32_t *)std::calloc(size, sizeof(uint32_t));
-    uint32_t *counts = (uint32_t *)std::calloc(size, sizeof(uint32_t));
-    uint8_t *col = cols[i];
+    std::vector<uint32_t> sums(size);
+    std::vector<uint32_t> counts(size);
+    std::vector<uint8_t>& col = cols[i];
     for (int64_t j = 0; j < num_rows; j++) {
       sums[col[j]] += metric_col[j];
       counts[col[j]]++;
@@ -250,11 +247,9 @@ void compute_stats(PyObject *obj, int metric_idx) {
           } else {
             printf("  %d: ", j - 1);
           }
-	}
-	printf("%.2f (z:%.4f, #:%d)\n", group_avg, z_score, counts[j]);
+        }
+        printf("%.2f (z:%.4f, #:%d)\n", group_avg, z_score, counts[j]);
       }
     }
-    std::free(sums);
-    std::free(counts);
   }
 }
