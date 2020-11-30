@@ -7,7 +7,7 @@
 #include <set>
 #include <map>
 
-extern "C" void compute_stats(PyObject *, int);
+extern "C" void compute_stats(PyObject *, int, double, int);
 
 #define STRING_CARD_LIMIT 100
 #define NUM_CARD_LIMIT 50
@@ -87,7 +87,7 @@ std::pair<double, double> discretize_cont(const T *data, int64_t len,
   return std::make_pair((double)min, (double)max);
 }
 
-void compute_stats(PyObject *obj, int metric_idx) {
+void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thresh) {
   arrow::py::PyAcquireGIL lock;
   arrow::py::import_pyarrow();
   auto table = arrow::py::unwrap_table(obj).ValueOrDie();
@@ -201,6 +201,9 @@ void compute_stats(PyObject *obj, int metric_idx) {
   global_dev = sqrt(global_dev / num_rows);
   printf("%s global mean: %.2f, global stddev: %.2f\n",
     table->schema()->field(metric_idx)->name().c_str(), global_avg, global_dev);
+  std::vector<std::vector<uint32_t>> col_sums(cols.size());
+  std::vector<std::vector<uint32_t>> col_counts(cols.size());
+  std::vector<std::vector<double>> col_devs(cols.size());
   for (int i = 0; i < cols.size(); i++) {
     int size;
     bool is_cat = true;
@@ -229,10 +232,13 @@ void compute_stats(PyObject *obj, int metric_idx) {
       counts[col[j]]++;
     }
     for (int j = 0; j < size; j++) {
+      if (counts[j] < count_thresh) {
+        continue;
+      }
       double group_avg = (double)sums[j] / counts[j];
       double effective_dev = global_dev / sqrt(counts[j]);
       double z_score = (group_avg - global_avg) / effective_dev;
-      if (abs(z_score) > 2) { // two std devs away
+      if (abs(z_score) > z_thresh) {
         if (j == 0) {
           printf("  NULL: ");
         } else {
@@ -249,6 +255,89 @@ void compute_stats(PyObject *obj, int metric_idx) {
           }
         }
         printf("%.2f (z:%.4f, #:%d)\n", group_avg, z_score, counts[j]);
+      }
+    }
+    std::vector<double> devs(size);
+    for (int64_t j = 0; j < num_rows; j++) {
+      if (counts[col[j]] < count_thresh) {
+        continue;
+      }
+      double group_avg = (double)sums[col[j]] / counts[col[j]];
+      devs[col[j]] += pow(metric_col[j] - group_avg, 2);
+    }
+    for (int j = 0; j < size; j++) {
+      devs[j] = sqrt(devs[j] / counts[j]);
+    }
+    col_sums[i] = std::move(sums);
+    col_counts[i] = std::move(counts);
+    col_devs[i] = std::move(devs);
+  }
+  for (int i = 0; i < cols.size(); i++) {
+    for (int j = i + 1; j < cols.size(); j++) {
+      int i_card = col_sums[i].size();
+      int j_card = col_sums[j].size();
+      std::vector<uint32_t> sums(i_card * j_card);
+      std::vector<uint32_t> counts(i_card * j_card);
+      std::vector<uint8_t>& i_col = cols[i];
+      std::vector<uint8_t>& j_col = cols[j];
+      for (int64_t k = 0; k < num_rows; k++) {
+        int idx = i_col[k] * j_card + j_col[k];
+        sums[idx] += metric_col[k];
+        counts[idx]++;
+      }
+      bool header_printed = false;
+      for (int k = 0; k < i_card; k++) {
+        for (int l = 0; l < j_card; l++) {
+          int idx = k * j_card + l;
+          if (counts[idx] < count_thresh) {
+            continue;
+          }
+          double group_avg = (double)sums[idx] / counts[idx];
+          double i_avg = (double)col_sums[i][k] / col_counts[i][k];
+          double j_avg = (double)col_sums[j][l] / col_counts[j][l];
+          double i_dev = col_devs[i][k] / sqrt(counts[idx]);
+          double j_dev = col_devs[j][l] / sqrt(counts[idx]);
+          double i_z_score = (group_avg - i_avg) / i_dev;
+          double j_z_score = (group_avg - j_avg) / j_dev;
+          if (abs(i_z_score) > z_thresh && abs(j_z_score) > z_thresh) {
+            if (!header_printed) {
+              printf("%s/%s:\n", table->schema()->field(orig_col_idx[i])->name().c_str(),
+                table->schema()->field(orig_col_idx[j])->name().c_str());
+              header_printed = true;
+            }
+            if (k == 0) {
+              printf("  NULL/");
+            } else {
+              if (double_mappings.find(i) != double_mappings.end()) {
+                printf("  %.2f/", double_mappings[i][k - 1]);
+              } else if (int_mappings.find(i) != int_mappings.end()) {
+                printf("  %lld/", int_mappings[i][k - 1]);
+              } else if (string_mappings.find(i) != string_mappings.end()) {
+                printf("  %s/", string_mappings[i][k - 1].c_str());
+              } else { // continuous
+                printf("  %d/", k - 1);
+              }
+            }
+            if (l == 0) {
+              printf("NULL: ");
+            } else {
+              if (double_mappings.find(j) != double_mappings.end()) {
+                printf("%.2f: ", double_mappings[j][l - 1]);
+              } else if (int_mappings.find(j) != int_mappings.end()) {
+                printf("%lld: ", int_mappings[j][l - 1]);
+              } else if (string_mappings.find(j) != string_mappings.end()) {
+                printf("%s: ", string_mappings[j][l - 1].c_str());
+              } else { // continuous
+                printf("%d: ", l - 1);
+              }
+            }
+            double smaller_z = i_z_score;
+            if (abs(j_z_score) < abs(i_z_score)) {
+              smaller_z = j_z_score;
+            }
+            printf("%.2f (z:%.4f, #:%d)\n", group_avg, smaller_z, counts[idx]);
+          }
+        }
       }
     }
   }
