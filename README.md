@@ -45,3 +45,9 @@ Install pandas and pyarrow (python3). Build the C++ library with `./build.sh`.
 Modify cube.py to load your dataset. Pass in the dataset, desired metric
 column, `z_thresh`, and `count_thresh`. Run with `python3 cube.py` to see printed
 results.
+
+## Example Data
+We include an example dataset Rookies.csv, which includes rookie-year stats for all NBA
+players through 2017. We look at which column values and pairs of values are interesting
+with respect to the "IFAS" metric column, which is a binary variable indicating whether
+the player ever became an all-star in their career.
