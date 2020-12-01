@@ -99,6 +99,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   std::map<int, std::vector<double>> double_mappings;
   std::map<int, std::vector<int64_t>> int_mappings;
   std::map<int, std::vector<std::string>> string_mappings;
+  printf("***Columns***\n");
   for (int i = 0; i < table->schema()->num_fields(); i++) {
     auto f = table->schema()->field(i);
     printf("%s: %s\n", f->name().c_str(), f->type()->ToString().c_str());
@@ -181,11 +182,13 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
           enumerate_cat(str_arr.data(), arr->length(), arr->null_bitmap_data(),
             col, mapping);
           string_mappings[col_idx] = std::move(mapping);
+        } else {
+          printf("  string cardinality too high\n");
         }
         break;
       }
       default:
-        printf("  unsupported type for card\n");
+        printf("  unsupported type\n");
     }
   }
 
@@ -199,8 +202,9 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
     global_dev += pow(metric_col[i] - global_avg, 2);
   }
   global_dev = sqrt(global_dev / num_rows);
-  printf("%s global mean: %.2f, global stddev: %.2f\n",
+  printf("\n%s global mean: %.2f, global stddev: %.2f\n",
     table->schema()->field(metric_idx)->name().c_str(), global_avg, global_dev);
+  printf("\n***1D stats***\n");
   std::vector<std::vector<uint32_t>> col_sums(cols.size());
   std::vector<std::vector<uint32_t>> col_counts(cols.size());
   std::vector<std::vector<double>> col_devs(cols.size());
@@ -272,6 +276,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
     col_counts[i] = std::move(counts);
     col_devs[i] = std::move(devs);
   }
+  printf("\n***2D stats***\n");
   for (int i = 0; i < cols.size(); i++) {
     for (int j = i + 1; j < cols.size(); j++) {
       int i_card = col_sums[i].size();
