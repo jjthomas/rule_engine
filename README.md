@@ -1,4 +1,4 @@
-## Overview
+## Pandas Summary Stats
 This library prints a summary of your tabular Pandas data. Provided
 a metric column of interest (e.g. a 0/1 class label, a numerical metric
 like latency, etc.), it prints any values of other columns and
@@ -8,7 +8,8 @@ Metric columns must be int or double have values in the range [0, 255].
 For other columns, string, int, and double types are supported. String
 columns with cardinality up to 100 will be considered. Int/double columns
 with cardinality up to 50 will be left as is, while such columns with greater
-cardinality will be discretized into 15 buckets of equal size.
+cardinality will be discretized into 15 buckets of equal size, plus a separate
+bucket for nulls.
 
 Any column values whose average metric values are are `z_thresh` standard deviations
 away from the global dataset metric average and appear in at least `count_thresh`
@@ -24,7 +25,7 @@ to discretize it into 15 equally sized buckets. Rows with an AS value in the
 first bucket had an average metric value of 2.0, which was 5.5 standard deviations
 above the mean. There were 101 such rows. There is a similar story for the second bucket.
 
-Instead of having a range, categorical variables will simply have the indicator "cat"
+Instead of having a range, categorical variables will simply have "cat"
 next to them in the 1D stats section. Their actual values will be used instead of bucket
 indices.
 
@@ -37,7 +38,7 @@ AS/TO:
 This shows that the 20 rows with AS in the first bucket and TO in the 13th bucket have an average
 metric value of 4.0, which is at least 3.1 standard deviations from both the average
 value for all rows with AS in first bucket and the average value for all rows with TO in the
-thirteenth bucket. The same `z_thresh` and `count_thresh` from the 1D stats is used for
+thirteenth bucket. The same `z_thresh` and `count_thresh` from the 1D stats are used for
 the 2D stats.
 
 ## Installation
