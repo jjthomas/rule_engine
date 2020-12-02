@@ -95,6 +95,8 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   int64_t num_rows = table->num_rows();
   std::vector<std::vector<uint8_t>> cols;
   std::vector<uint8_t> metric_col(num_rows);
+  bool metric_cat = false;
+  std::pair<double, double> metric_min_max;
   std::vector<int> orig_col_idx;
   std::map<int, std::pair<double, double>> min_max;
   std::map<int, std::vector<double>> double_mappings;
@@ -125,6 +127,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
               assert(arr->Value(i) >= 0 && arr->Value(i) < 256);
               col[i] = (uint8_t)arr->Value(i);
             }
+            metric_cat = true;
           } else {
             std::vector<double> mapping;
             enumerate_cat(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
@@ -132,8 +135,13 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
             double_mappings[col_idx] = std::move(mapping);
           }
         } else {
-          min_max[col_idx] = discretize_cont(arr->raw_values(), arr->length(),
+          std::pair<double, double> bounds = discretize_cont(arr->raw_values(), arr->length(),
             arr->null_bitmap_data(), col);
+          if (i == metric_idx) {
+            metric_min_max = bounds;
+          } else {
+            min_max[col_idx] = bounds;
+          }
         }
         break;
       }
@@ -155,6 +163,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
               assert(arr->Value(i) >= 0 && arr->Value(i) < 256);
               col[i] = (uint8_t)arr->Value(i);
             }
+            metric_cat = true;
           } else {
             std::vector<int64_t> mapping;
             enumerate_cat(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
@@ -162,8 +171,13 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
             int_mappings[col_idx] = std::move(mapping);
           }
         } else {
-          min_max[col_idx] = discretize_cont(arr->raw_values(), arr->length(),
+          std::pair<double, double> bounds = discretize_cont(arr->raw_values(), arr->length(),
             arr->null_bitmap_data(), col);
+          if (i == metric_idx) {
+            metric_min_max = bounds;
+          } else {
+            min_max[col_idx] = bounds;
+          }
         }
         break;
       }
@@ -203,8 +217,13 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
     global_dev += pow(metric_col[i] - global_avg, 2);
   }
   global_dev = sqrt(global_dev / num_rows);
-  printf("\n%s global mean: %.2f, global stddev: %.2f\n",
-    table->schema()->field(metric_idx)->name().c_str(), global_avg, global_dev);
+  printf("\n%s ", table->schema()->field(metric_idx)->name().c_str());
+  if (metric_cat) {
+    printf("(cat) ");
+  } else {
+    printf("(%.2f-%.2f) ", metric_min_max.first, metric_min_max.second);
+  }
+  printf("global mean: %.2f, global stddev: %.2f\n", global_avg, global_dev);
   printf("\n***1D stats***\n");
   std::vector<std::vector<uint32_t>> col_sums(cols.size());
   std::vector<std::vector<uint32_t>> col_counts(cols.size());

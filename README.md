@@ -15,18 +15,27 @@ is double.
 
 Any column values whose average metric values are are `z_thresh` standard deviations
 away from the global dataset metric average and appear in at least `count_thresh`
-rows will be reported in the 1D stats section of the output. For example, for a
-continuous column called "Price" and a discretized metric column called "Total Sales",
-we might see the following output:
+rows will be reported in the 1D stats section of the output. For example, with
+`z_thresh=3.0` and `count_thresh=20`, and for a continuous column called "Price"
+and a continuous metric column called "Total Sales", we might see the following output:
 ```
+Total Sales (500.3-70045.1) global mean: 4.1, global stddev: 2.2
+
+***1D stats***
+
+...
+
 Price (5.0-100.0):
-  0: 7.0 (z: 4.8, #: 101)
-  1: 5.5 (z: 3.6, #: 75)
+  0: 5.2 (z: 4.8, #: 101)
+  1: 3.2 (z: -3.6, #: 75)
 ```
-This indicates that the Price column had a range of [5.0, 100.0] that was used
-to discretize it into 15 equally sized buckets. Rows with an Price value in the
-first bucket had an average metric value of 7.0, which was 4.8 standard deviations
-above the mean. There were 101 such rows. There is a similar story for the second bucket.
+This indicates that the Total Sales column has a range of [500.3, 70045.1] that
+was used to discretize it into 15 equally sized buckets. The average Total Sales
+bucket index across all the rows is 4.1 with standard deviation 2.2. Further,
+the Price column has a range of [5.0, 100.0] that was used
+to discretize it into 15 equally sized buckets. The 101 rows with a Price value in the
+first bucket have an average metric value of 5.2, which is 4.8 standard deviations
+above the mean of 4.1. There is a similar story for the second bucket.
 
 Instead of having a range, categorical variables will simply have "cat"
 next to them in the 1D stats section. Their actual values will be used instead of bucket
@@ -35,11 +44,15 @@ indices.
 The 2D stats section shows any pairs of column values that are interesting. If we had a
 second categorical column called "Department", we might see the following output:
 ```
+***2D stats***
+
+...
+
 Price/Department:
-  0/Shoes: 10.2 (z: 3.1, #: 20)
+  0/Shoes: 7.0 (z: 3.1, #: 20)
 ```
 This shows that the 20 rows with Price in the first bucket and Department=Shoes have an average
-metric value of 10.2, which is at least 3.1 standard deviations from both the average
+metric value of 7.0, which is at least 3.1 standard deviations from both the average
 value for all rows with Price in first bucket and the average value for all rows with
 Department=Shoes. The same `z_thresh` and `count_thresh` from the 1D stats are used for
 the 2D stats.
