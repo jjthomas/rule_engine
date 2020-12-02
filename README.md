@@ -44,8 +44,8 @@ the 2D stats.
 ## Installation
 Install pandas and pyarrow (python3). Build the C++ library with `./build.sh`.
 Modify cube.py to load your dataset. Pass in the dataset, desired metric
-column, `z_thresh`, and `count_thresh`. Run with `python3 cube.py` to see printed
-results.
+column, `z_thresh`, `count_thresh`, and whether results with a null column value
+should be shown. Run with `python3 cube.py` to see printed results.
 
 ## Example Data
 We include an example dataset Rookies.csv, which includes rookie-year stats for all NBA

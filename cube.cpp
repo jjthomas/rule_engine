@@ -7,7 +7,7 @@
 #include <set>
 #include <map>
 
-extern "C" void compute_stats(PyObject *, int, double, int);
+extern "C" void compute_stats(PyObject *, int, double, int, int);
 
 #define STRING_CARD_LIMIT 100
 #define NUM_CARD_LIMIT 50
@@ -87,7 +87,8 @@ std::pair<double, double> discretize_cont(const T *data, int64_t len,
   return std::make_pair((double)min, (double)max);
 }
 
-void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thresh) {
+void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thresh,
+  int show_nulls) {
   arrow::py::PyAcquireGIL lock;
   arrow::py::import_pyarrow();
   auto table = arrow::py::unwrap_table(obj).ValueOrDie();
@@ -208,6 +209,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   std::vector<std::vector<uint32_t>> col_sums(cols.size());
   std::vector<std::vector<uint32_t>> col_counts(cols.size());
   std::vector<std::vector<double>> col_devs(cols.size());
+  int value_start_idx = show_nulls ? 0 : 1;
   for (int i = 0; i < cols.size(); i++) {
     int size;
     bool is_cat = true;
@@ -235,7 +237,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
       sums[col[j]] += metric_col[j];
       counts[col[j]]++;
     }
-    for (int j = 0; j < size; j++) {
+    for (int j = value_start_idx; j < size; j++) {
       if (counts[j] < count_thresh) {
         continue;
       }
@@ -291,8 +293,8 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
         counts[idx]++;
       }
       bool header_printed = false;
-      for (int k = 0; k < i_card; k++) {
-        for (int l = 0; l < j_card; l++) {
+      for (int k = value_start_idx; k < i_card; k++) {
+        for (int l = value_start_idx; l < j_card; l++) {
           int idx = k * j_card + l;
           if (counts[idx] < count_thresh) {
             continue;
