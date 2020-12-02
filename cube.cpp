@@ -123,8 +123,15 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
         if (is_cat) {
           if (i == metric_idx) {
             for (int64_t i = 0; i < arr->length(); i++) {
-              assert(!arr->IsNull(i));
-              assert(arr->Value(i) >= 0 && arr->Value(i) < 256);
+              if (arr->IsNull(i)) {
+                printf("ERROR: null metric value at row %lld\n", i);
+                return;
+              }
+              if (!(arr->Value(i) >= 0 && arr->Value(i) < 256)) {
+                printf("ERROR: categorical metric has value %.2f "
+                  "outside range [0, 256) at row %lld\n", arr->Value(i), i);
+                return;
+              }
               col[i] = (uint8_t)arr->Value(i);
             }
             metric_cat = true;
@@ -159,8 +166,15 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
         if (is_cat) {
           if (i == metric_idx) {
             for (int64_t i = 0; i < arr->length(); i++) {
-              assert(!arr->IsNull(i));
-              assert(arr->Value(i) >= 0 && arr->Value(i) < 256);
+              if (arr->IsNull(i)) {
+                printf("ERROR: null metric value at row %lld\n", i);
+                return;
+              }
+              if (!(arr->Value(i) >= 0 && arr->Value(i) < 256)) {
+                printf("ERROR: categorical metric has value %lld "
+                  "outside range [0, 256) at row %lld\n", arr->Value(i), i);
+                return;
+              }
               col[i] = (uint8_t)arr->Value(i);
             }
             metric_cat = true;
