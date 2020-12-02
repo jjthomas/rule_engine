@@ -1,8 +1,8 @@
-## Pandas Summary Stats
-This library prints a summary of your tabular Pandas data. Provided
+## Pandas Interesting Subgroups
+This library tries to find interesting subgroups in your tabular Pandas data. Provided
 a metric column of interest (e.g. a 0/1 class label, a numerical metric
 like latency, etc.), it prints any values of other columns and
-pairs of these values that are unusually correlated with that metric.
+pairs of these values that are associated with unusual values of the metric.
 
 String, int, and double columns are supported. String
 columns with cardinality up to 100 will be considered. Int/double columns
