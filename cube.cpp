@@ -221,7 +221,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
     }
   }
 
-  uint32_t global_sum = 0;
+  uint64_t global_sum = 0;
   for (int64_t i = 0; i < num_rows; i++) {
     global_sum += metric_col[i];
   }
@@ -239,8 +239,8 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   }
   printf("global mean: %.2f, global stddev: %.2f\n", global_avg, global_dev);
   printf("\n***1D stats***\n");
-  std::vector<std::vector<uint32_t>> col_sums(cols.size());
-  std::vector<std::vector<uint32_t>> col_counts(cols.size());
+  std::vector<std::vector<uint64_t>> col_sums(cols.size());
+  std::vector<std::vector<uint64_t>> col_counts(cols.size());
   std::vector<std::vector<double>> col_devs(cols.size());
   int value_start_idx = show_nulls ? 0 : 1;
   for (int i = 0; i < cols.size(); i++) {
@@ -263,8 +263,8 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
     } else {
       printf(" (%.2f-%.2f):\n", min_max[i].first, min_max[i].second);
     }
-    std::vector<uint32_t> sums(size);
-    std::vector<uint32_t> counts(size);
+    std::vector<uint64_t> sums(size);
+    std::vector<uint64_t> counts(size);
     std::vector<uint8_t>& col = cols[i];
     for (int64_t j = 0; j < num_rows; j++) {
       sums[col[j]] += metric_col[j];
@@ -293,7 +293,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
             printf("  %d: ", j - 1);
           }
         }
-        printf("%.2f (z:%.4f, #:%d)\n", group_avg, z_score, counts[j]);
+        printf("%.2f (z:%.4f, #:%llu)\n", group_avg, z_score, counts[j]);
       }
     }
     std::vector<double> devs(size);
@@ -316,8 +316,8 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
     for (int j = i + 1; j < cols.size(); j++) {
       int i_card = col_sums[i].size();
       int j_card = col_sums[j].size();
-      std::vector<uint32_t> sums(i_card * j_card);
-      std::vector<uint32_t> counts(i_card * j_card);
+      std::vector<uint64_t> sums(i_card * j_card);
+      std::vector<uint64_t> counts(i_card * j_card);
       std::vector<uint8_t>& i_col = cols[i];
       std::vector<uint8_t>& j_col = cols[j];
       for (int64_t k = 0; k < num_rows; k++) {
@@ -375,7 +375,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
             if (abs(j_z_score) < abs(i_z_score)) {
               smaller_z = j_z_score;
             }
-            printf("%.2f (z:%.4f, #:%d)\n", group_avg, smaller_z, counts[idx]);
+            printf("%.2f (z:%.4f, #:%llu)\n", group_avg, smaller_z, counts[idx]);
           }
         }
       }
