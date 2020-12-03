@@ -6,6 +6,7 @@
 #include <cmath>
 #include <set>
 #include <map>
+#include <inttypes.h>
 
 extern "C" void compute_stats(PyObject *, int, double, int, int);
 
@@ -124,12 +125,12 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
           if (i == metric_idx) {
             for (int64_t i = 0; i < arr->length(); i++) {
               if (arr->IsNull(i)) {
-                printf("ERROR: null metric value at row %lld\n", i);
+                printf("ERROR: null metric value at row %" PRId64 "\n", i);
                 return;
               }
               if (!(arr->Value(i) >= 0 && arr->Value(i) < 256)) {
                 printf("ERROR: categorical metric has value %.2f "
-                  "outside range [0, 256) at row %lld\n", arr->Value(i), i);
+                  "outside range [0, 256) at row %" PRId64 "\n", arr->Value(i), i);
                 return;
               }
               col[i] = (uint8_t)arr->Value(i);
@@ -167,12 +168,12 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
           if (i == metric_idx) {
             for (int64_t i = 0; i < arr->length(); i++) {
               if (arr->IsNull(i)) {
-                printf("ERROR: null metric value at row %lld\n", i);
+                printf("ERROR: null metric value at row %" PRId64 "\n", i);
                 return;
               }
               if (!(arr->Value(i) >= 0 && arr->Value(i) < 256)) {
-                printf("ERROR: categorical metric has value %lld "
-                  "outside range [0, 256) at row %lld\n", arr->Value(i), i);
+                printf("ERROR: categorical metric has value %" PRId64
+                  " outside range [0, 256) at row %" PRId64 "\n", arr->Value(i), i);
                 return;
               }
               col[i] = (uint8_t)arr->Value(i);
@@ -285,7 +286,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
             if (double_mappings.find(i) != double_mappings.end()) {
               printf("  %.2f: ", double_mappings[i][j - 1]);
             } else if (int_mappings.find(i) != int_mappings.end()) {
-              printf("  %lld: ", int_mappings[i][j - 1]);
+              printf("  %" PRId64 ": ", int_mappings[i][j - 1]);
             } else { // string
               printf("  %s: ", string_mappings[i][j - 1].c_str());
             }
@@ -293,7 +294,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
             printf("  %d: ", j - 1);
           }
         }
-        printf("%.2f (z:%.4f, #:%llu)\n", group_avg, z_score, counts[j]);
+        printf("%.2f (z:%.4f, #:%" PRIu64 ")\n", group_avg, z_score, counts[j]);
       }
     }
     std::vector<double> devs(size);
@@ -351,7 +352,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
               if (double_mappings.find(i) != double_mappings.end()) {
                 printf("  %.2f/", double_mappings[i][k - 1]);
               } else if (int_mappings.find(i) != int_mappings.end()) {
-                printf("  %lld/", int_mappings[i][k - 1]);
+                printf("  %" PRId64 "/", int_mappings[i][k - 1]);
               } else if (string_mappings.find(i) != string_mappings.end()) {
                 printf("  %s/", string_mappings[i][k - 1].c_str());
               } else { // continuous
@@ -364,7 +365,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
               if (double_mappings.find(j) != double_mappings.end()) {
                 printf("%.2f: ", double_mappings[j][l - 1]);
               } else if (int_mappings.find(j) != int_mappings.end()) {
-                printf("%lld: ", int_mappings[j][l - 1]);
+                printf("%" PRId64 ": ", int_mappings[j][l - 1]);
               } else if (string_mappings.find(j) != string_mappings.end()) {
                 printf("%s: ", string_mappings[j][l - 1].c_str());
               } else { // continuous
@@ -375,7 +376,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
             if (abs(j_z_score) < abs(i_z_score)) {
               smaller_z = j_z_score;
             }
-            printf("%.2f (z:%.4f, #:%llu)\n", group_avg, smaller_z, counts[idx]);
+            printf("%.2f (z:%.4f, #:%" PRIu64 ")\n", group_avg, smaller_z, counts[idx]);
           }
         }
       }
