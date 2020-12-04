@@ -279,7 +279,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
       double group_avg = (double)sums[j] / counts[j];
       double effective_dev = global_dev / sqrt(counts[j]);
       double z_score = (group_avg - global_avg) / effective_dev;
-      if (abs(z_score) > z_thresh) {
+      if (std::abs(z_score) > z_thresh) {
         if (j == 0) {
           printf("  NULL: ");
         } else {
@@ -341,7 +341,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
           double j_dev = col_devs[j][l] / sqrt(counts[idx]);
           double i_z_score = (group_avg - i_avg) / i_dev;
           double j_z_score = (group_avg - j_avg) / j_dev;
-          if (abs(i_z_score) > z_thresh && abs(j_z_score) > z_thresh) {
+          if (std::abs(i_z_score) > z_thresh && std::abs(j_z_score) > z_thresh) {
             if (!header_printed) {
               printf("%s/%s:\n", table->schema()->field(orig_col_idx[i])->name().c_str(),
                 table->schema()->field(orig_col_idx[j])->name().c_str());
@@ -374,7 +374,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
               }
             }
             double smaller_z = i_z_score;
-            if (abs(j_z_score) < abs(i_z_score)) {
+            if (std::abs(j_z_score) < std::abs(i_z_score)) {
               smaller_z = j_z_score;
             }
             printf("%.2f (z:%.4f, #:%" PRIu64 ")\n", group_avg, smaller_z, counts[idx]);
