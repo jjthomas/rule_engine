@@ -1,4 +1,5 @@
 #!/bin/bash
+CC=g++
 python3 -c 'import pyarrow; pyarrow.create_library_symlinks()'
 INC=$(python3 -c 'import pyarrow; print(pyarrow.get_include())')
 LIB=$(python3 -c 'import pyarrow; print(pyarrow.get_library_dirs()[0])')
@@ -8,6 +9,8 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
   PY_LIB_NAME="-l$PY_LIB_NAME"
   PY_LIB=$(dirname $(python3 -c "from sysconfig import get_paths as gp; print(gp()['stdlib'])"))
   PY_LIB="-L$PY_LIB"
+  CC=/usr/local/opt/llvm/bin/clang++
+  OMP_LIB="-L/usr/local/opt/llvm/lib"
 fi
-g++ -std=c++11 -I$INC -I$PY_INC -fPIC cube.cpp -shared -o libcube -L$LIB $PY_LIB -larrow -larrow_python $PY_LIB_NAME
+$CC -std=c++11 -fopenmp -I$INC -I$PY_INC -fPIC cube.cpp -shared -o libcube -L$LIB $PY_LIB $OMP_LIB -larrow -larrow_python $PY_LIB_NAME
 

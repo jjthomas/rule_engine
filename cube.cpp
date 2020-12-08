@@ -89,68 +89,60 @@ std::pair<double, double> discretize_cont(const T *data, int64_t len,
   return std::make_pair((double)min, (double)max);
 }
 
+enum ColStatus {
+  CONT, CAT, BAD_TYPE, STRING_HIGH_CARD, METRIC_ERROR
+};
+
 void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thresh,
   int show_nulls) {
   arrow::py::PyAcquireGIL lock;
   arrow::py::import_pyarrow();
   auto table = arrow::py::unwrap_table(obj).ValueOrDie();
   int64_t num_rows = table->num_rows();
-  std::vector<std::vector<uint8_t>> cols;
-  std::vector<uint8_t> metric_col(num_rows);
-  bool metric_cat = false;
-  std::pair<double, double> metric_min_max;
-  std::vector<int> orig_col_idx;
-  std::map<int, std::pair<double, double>> min_max;
-  std::map<int, std::vector<double>> double_mappings;
-  std::map<int, std::vector<int64_t>> int_mappings;
-  std::map<int, std::vector<std::string>> string_mappings;
+  int num_fields = table->schema()->num_fields();
+  std::vector<std::vector<uint8_t>> cols_init(num_fields);
+  std::vector<ColStatus> col_status(num_fields);
+  std::vector<std::pair<double, double>> min_max_init(num_fields);
+  std::vector<std::vector<double>> double_mappings_init(num_fields);
+  std::vector<std::vector<int64_t>> int_mappings_init(num_fields);
+  std::vector<std::vector<std::string>> string_mappings_init(num_fields);
   printf("***Columns***\n");
+  #pragma omp parallel for schedule(dynamic)
   for (int i = 0; i < table->schema()->num_fields(); i++) {
     auto f = table->schema()->field(i);
-    printf("%s: %s\n", f->name().c_str(), f->type()->ToString().c_str());
     assert(table->column(i)->num_chunks() == 1);
-    int col_idx = cols.size();
     switch (f->type()->id()) {
       case arrow::Type::type::DOUBLE: {
         auto arr = std::static_pointer_cast<arrow::DoubleArray>(table->column(i)->chunk(0));
         bool is_cat = categorical(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
           NUM_CARD_LIMIT);
-        std::vector<uint8_t> *col_ptr = &metric_col;
-        if (i != metric_idx) {
-          cols.push_back(std::vector<uint8_t>(num_rows));
-          col_ptr = &cols.back();
-          orig_col_idx.push_back(i);
-        }
-        std::vector<uint8_t>& col = *col_ptr;
+        cols_init[i] = std::vector<uint8_t>(num_rows);
+        std::vector<uint8_t>& col = cols_init[i];
         if (is_cat) {
+          col_status[i] = CAT;
           if (i == metric_idx) {
-            for (int64_t i = 0; i < arr->length(); i++) {
-              if (arr->IsNull(i)) {
-                printf("ERROR: null metric value at row %" PRId64 "\n", i);
-                return;
+            for (int64_t j = 0; j < arr->length(); j++) {
+              if (arr->IsNull(j)) {
+                printf("ERROR: null metric value at row %" PRId64 "\n", j);
+                col_status[i] = METRIC_ERROR;
+                break;
               }
-              if (!(arr->Value(i) >= 0 && arr->Value(i) < 256)) {
+              if (!(arr->Value(j) >= 0 && arr->Value(j) < 256)) {
                 printf("ERROR: categorical metric has value %.2f "
-                  "outside range [0, 256) at row %" PRId64 "\n", arr->Value(i), i);
-                return;
+                  "outside range [0, 256) at row %" PRId64 "\n", arr->Value(j), j);
+                col_status[i] = METRIC_ERROR;
+                break;
               }
-              col[i] = (uint8_t)arr->Value(i);
+              col[j] = (uint8_t)arr->Value(j);
             }
-            metric_cat = true;
           } else {
-            std::vector<double> mapping;
             enumerate_cat(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
-              col, mapping);
-            double_mappings[col_idx] = std::move(mapping);
+              col, double_mappings_init[i]);
           }
         } else {
-          std::pair<double, double> bounds = discretize_cont(arr->raw_values(), arr->length(),
+          col_status[i] = CONT;
+          min_max_init[i] = discretize_cont(arr->raw_values(), arr->length(),
             arr->null_bitmap_data(), col);
-          if (i == metric_idx) {
-            metric_min_max = bounds;
-          } else {
-            min_max[col_idx] = bounds;
-          }
         }
         break;
       }
@@ -158,42 +150,33 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
         auto arr = std::static_pointer_cast<arrow::Int64Array>(table->column(i)->chunk(0));
         bool is_cat = categorical(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
           NUM_CARD_LIMIT);
-        std::vector<uint8_t> *col_ptr = &metric_col;
-        if (i != metric_idx) {
-          cols.push_back(std::vector<uint8_t>(num_rows));
-          col_ptr = &cols.back();
-          orig_col_idx.push_back(i);
-        }
-        std::vector<uint8_t>& col = *col_ptr;
+        cols_init[i] = std::vector<uint8_t>(num_rows);
+        std::vector<uint8_t>& col = cols_init[i];
         if (is_cat) {
+          col_status[i] = CAT;
           if (i == metric_idx) {
-            for (int64_t i = 0; i < arr->length(); i++) {
-              if (arr->IsNull(i)) {
-                printf("ERROR: null metric value at row %" PRId64 "\n", i);
-                return;
+            for (int64_t j = 0; j < arr->length(); j++) {
+              if (arr->IsNull(j)) {
+                printf("ERROR: null metric value at row %" PRId64 "\n", j);
+                col_status[i] = METRIC_ERROR;
+                break;
               }
-              if (!(arr->Value(i) >= 0 && arr->Value(i) < 256)) {
+              if (!(arr->Value(j) >= 0 && arr->Value(j) < 256)) {
                 printf("ERROR: categorical metric has value %" PRId64
-                  " outside range [0, 256) at row %" PRId64 "\n", arr->Value(i), i);
-                return;
+                  " outside range [0, 256) at row %" PRId64 "\n", arr->Value(j), j);
+                col_status[i] = METRIC_ERROR;
+                break;
               }
-              col[i] = (uint8_t)arr->Value(i);
+              col[j] = (uint8_t)arr->Value(j);
             }
-            metric_cat = true;
           } else {
-            std::vector<int64_t> mapping;
             enumerate_cat(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
-              col, mapping);
-            int_mappings[col_idx] = std::move(mapping);
+              col, int_mappings_init[i]);
           }
         } else {
-          std::pair<double, double> bounds = discretize_cont(arr->raw_values(), arr->length(),
+          col_status[i] = CONT;
+          min_max_init[i] = discretize_cont(arr->raw_values(), arr->length(),
             arr->null_bitmap_data(), col);
-          if (i == metric_idx) {
-            metric_min_max = bounds;
-          } else {
-            min_max[col_idx] = bounds;
-          }
         }
         break;
       }
@@ -206,20 +189,61 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
         bool is_cat = categorical(str_arr.data(), arr->length(), arr->null_bitmap_data(),
           STRING_CARD_LIMIT);
         if (is_cat) {
-          cols.push_back(std::vector<uint8_t>(num_rows));
-          std::vector<uint8_t>& col = cols.back();
-          orig_col_idx.push_back(i);
-          std::vector<std::string> mapping;
+          col_status[i] = CAT;
+          cols_init[i] = std::vector<uint8_t>(num_rows);
           enumerate_cat(str_arr.data(), arr->length(), arr->null_bitmap_data(),
-            col, mapping);
-          string_mappings[col_idx] = std::move(mapping);
+            cols_init[i], string_mappings_init[i]);
         } else {
-          printf("  string cardinality too high\n");
+          col_status[i] = STRING_HIGH_CARD;
         }
         break;
       }
       default:
-        printf("  unsupported type\n");
+        col_status[i] = BAD_TYPE;
+    }
+  }
+
+  if (col_status[metric_idx] == METRIC_ERROR) {
+    return;
+  }
+  std::vector<uint8_t> metric_col = std::move(cols_init[metric_idx]);
+  std::pair<double, double> metric_min_max = min_max_init[metric_idx];
+  bool metric_cat = col_status[metric_idx] == CAT;
+
+  std::vector<std::vector<uint8_t>> cols;
+  std::vector<int> orig_col_idx;
+  std::map<int, std::pair<double, double>> min_max;
+  std::map<int, std::vector<double>> double_mappings;
+  std::map<int, std::vector<int64_t>> int_mappings;
+  std::map<int, std::vector<std::string>> string_mappings;
+  for (int i = 0; i < table->schema()->num_fields(); i++) {
+    auto f = table->schema()->field(i);
+    printf("%s: %s\n", f->name().c_str(), f->type()->ToString().c_str());
+    if (col_status[i] == BAD_TYPE) {
+      printf("  unsupported type\n");
+    } else if (col_status[i] == STRING_HIGH_CARD) {
+      printf("  string cardinality too high\n");
+    }
+    if (i == metric_idx) {
+      if (col_status[i] == BAD_TYPE || f->type()->id() == arrow::Type::type::STRING) {
+        printf("ERROR: unsupported type for metric\n");
+        return;
+      }
+    } else if (col_status[i] == CONT || col_status[i] == CAT) {
+      int cur_col = cols.size();
+      if (col_status[i] == CONT) {
+        min_max[cur_col] = min_max_init[i];
+      } else {
+        if (f->type()->id() == arrow::Type::type::DOUBLE) {
+          double_mappings[cur_col] = std::move(double_mappings_init[i]);
+        } else if (f->type()->id() == arrow::Type::type::INT64) {
+          int_mappings[cur_col] = std::move(int_mappings_init[i]);
+        } else { // string
+          string_mappings[cur_col] = std::move(string_mappings_init[i]);
+        }
+      }
+      orig_col_idx.push_back(i);
+      cols.push_back(std::move(cols_init[i]));
     }
   }
 
