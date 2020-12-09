@@ -270,7 +270,6 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   int value_start_idx = show_nulls ? 0 : 1;
   for (int i = 0; i < cols.size(); i++) {
     int size;
-    bool is_cat = true;
     if (double_mappings.find(i) != double_mappings.end()) {
       size = double_mappings[i].size();
     } else if (int_mappings.find(i) != int_mappings.end()) {
@@ -279,7 +278,6 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
       size = string_mappings[i].size();
     } else { // continuous
       size = DISC_COUNT;
-      is_cat = false;
     }
     size += 1; // account for null
     std::vector<uint64_t> sums(size);
@@ -305,15 +303,13 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
         if (j == 0) {
           printf("  NULL: ");
         } else {
-          if (is_cat) {
-            if (double_mappings.find(i) != double_mappings.end()) {
-              printf("  %.2f: ", double_mappings[i][j - 1]);
-            } else if (int_mappings.find(i) != int_mappings.end()) {
-              printf("  %" PRId64 ": ", int_mappings[i][j - 1]);
-            } else { // string
-              printf("  %s: ", string_mappings[i][j - 1].c_str());
-            }
-          } else {
+          if (double_mappings.find(i) != double_mappings.end()) {
+            printf("  %.2f: ", double_mappings[i][j - 1]);
+          } else if (int_mappings.find(i) != int_mappings.end()) {
+            printf("  %" PRId64 ": ", int_mappings[i][j - 1]);
+          } else if (string_mappings.find(i) != string_mappings.end()) {
+            printf("  %s: ", string_mappings[i][j - 1].c_str());
+          } else { // continuous
             printf("  %d: ", j - 1);
           }
         }
