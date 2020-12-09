@@ -208,7 +208,6 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   }
   std::vector<uint8_t> metric_col = std::move(cols_init[metric_idx]);
   std::pair<double, double> metric_min_max = min_max_init[metric_idx];
-  bool metric_cat = col_status[metric_idx] == CAT;
 
   std::vector<std::vector<uint8_t>> cols;
   std::vector<int> orig_col_idx;
@@ -220,9 +219,9 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
     auto f = table->schema()->field(i);
     printf("%s: %s\n", f->name().c_str(), f->type()->ToString().c_str());
     if (col_status[i] == BAD_TYPE) {
-      printf("  unsupported type\n");
+      printf("  WARN: unsupported type\n");
     } else if (col_status[i] == STRING_HIGH_CARD) {
-      printf("  string cardinality too high\n");
+      printf("  WARN: string cardinality too high to use\n");
     }
     if (i == metric_idx) {
       if (col_status[i] == BAD_TYPE || f->type()->id() == arrow::Type::type::STRING) {
@@ -245,6 +244,11 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
       orig_col_idx.push_back(i);
       cols.push_back(std::move(cols_init[i]));
     }
+    if (col_status[i] == CAT) {
+      printf("  categorical\n");
+    } else if (col_status[i] == CONT) {
+      printf("  continuous (%.2f-%.2f)\n", min_max_init[i].first, min_max_init[i].second);
+    }
   }
 
   uint64_t global_sum = 0;
@@ -257,13 +261,8 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
     global_dev += pow(metric_col[i] - global_avg, 2);
   }
   global_dev = sqrt(global_dev / num_rows);
-  printf("\n%s ", table->schema()->field(metric_idx)->name().c_str());
-  if (metric_cat) {
-    printf("(cat) ");
-  } else {
-    printf("(%.2f-%.2f) ", metric_min_max.first, metric_min_max.second);
-  }
-  printf("global mean: %.2f, global stddev: %.2f\n", global_avg, global_dev);
+  printf("\n%s global mean: %.2f, global stddev: %.2f\n",
+    table->schema()->field(metric_idx)->name().c_str(), global_avg, global_dev);
   printf("\n***1D stats***\n");
   std::vector<std::vector<uint64_t>> col_sums(cols.size());
   std::vector<std::vector<uint64_t>> col_counts(cols.size());
@@ -283,12 +282,6 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
       is_cat = false;
     }
     size += 1; // account for null
-    printf("%s", table->schema()->field(orig_col_idx[i])->name().c_str());
-    if (is_cat) {
-      printf(" (cat):\n");
-    } else {
-      printf(" (%.2f-%.2f):\n", min_max[i].first, min_max[i].second);
-    }
     std::vector<uint64_t> sums(size);
     std::vector<uint64_t> counts(size);
     std::vector<uint8_t>& col = cols[i];
@@ -296,6 +289,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
       sums[col[j]] += metric_col[j];
       counts[col[j]]++;
     }
+    bool header_printed = false;
     for (int j = value_start_idx; j < size; j++) {
       if (counts[j] < count_thresh) {
         continue;
@@ -304,6 +298,10 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
       double effective_dev = global_dev / sqrt(counts[j]);
       double z_score = (group_avg - global_avg) / effective_dev;
       if (std::abs(z_score) > z_thresh) {
+        if (!header_printed) {
+          printf("%s:\n", table->schema()->field(orig_col_idx[i])->name().c_str());
+          header_printed = true;
+        }
         if (j == 0) {
           printf("  NULL: ");
         } else {
