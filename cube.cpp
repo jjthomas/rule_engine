@@ -351,88 +351,89 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   printf("\n***2D stats***\n");
   std::vector<std::vector<uint64_t>> pair_sums(cols.size() * (cols.size() - 1) / 2);
   std::vector<std::vector<uint64_t>> pair_counts(pair_sums.size());
-  gettimeofday(&start, 0);
-  #pragma omp parallel for collapse(2)
+  std::vector<std::pair<int, int>> idx_mapping;
   for (int i = 0; i < cols.size(); i++) {
     for (int j = i + 1; j < cols.size(); j++) {
-      int i_card = col_sums[i].size();
-      int j_card = col_sums[j].size();
-      std::vector<uint64_t> sums(i_card * j_card);
-      std::vector<uint64_t> counts(i_card * j_card);
-      std::vector<uint8_t>& i_col = cols[i];
-      std::vector<uint8_t>& j_col = cols[j];
-      for (int64_t k = 0; k < num_rows; k++) {
-        int idx = i_col[k] * j_card + j_col[k];
-        sums[idx] += metric_col[k];
-        counts[idx]++;
-      }
-      // subtract off the remaining triangle and add index in current triangle row
-      int pair_idx = pair_sums.size() - (cols.size() - i) * (cols.size() - i - 1) / 2
-        + (j - (i + 1));
-      pair_sums[pair_idx] = std::move(sums);
-      pair_counts[pair_idx] = std::move(counts);
+      idx_mapping.emplace_back(i, j);
     }
   }
-  for (int i = 0; i < cols.size(); i++) {
-    for (int j = i + 1; j < cols.size(); j++) {
-      int pair_idx = pair_sums.size() - (cols.size() - i) * (cols.size() - i - 1) / 2
-        + (j - (i + 1));
-      std::vector<uint64_t>& sums = pair_sums[pair_idx];
-      std::vector<uint64_t>& counts = pair_counts[pair_idx];
-      int i_card = col_sums[i].size();
-      int j_card = col_sums[j].size();
-      bool header_printed = false;
-      for (int k = value_start_idx; k < i_card; k++) {
-        for (int l = value_start_idx; l < j_card; l++) {
-          int idx = k * j_card + l;
-          if (counts[idx] < count_thresh) {
-            continue;
+  gettimeofday(&start, 0);
+  #pragma omp parallel for
+  for (int pair_idx = 0; pair_idx < pair_sums.size(); pair_idx++) {
+    int i = idx_mapping[pair_idx].first;
+    int j = idx_mapping[pair_idx].second;
+    int i_card = col_sums[i].size();
+    int j_card = col_sums[j].size();
+    std::vector<uint64_t> sums(i_card * j_card);
+    std::vector<uint64_t> counts(i_card * j_card);
+    std::vector<uint8_t>& i_col = cols[i];
+    std::vector<uint8_t>& j_col = cols[j];
+    for (int64_t k = 0; k < num_rows; k++) {
+      int idx = i_col[k] * j_card + j_col[k];
+      sums[idx] += metric_col[k];
+      counts[idx]++;
+    }
+    pair_sums[pair_idx] = std::move(sums);
+    pair_counts[pair_idx] = std::move(counts);
+  }
+  for (int pair_idx = 0; pair_idx < pair_sums.size(); pair_idx++) {
+    std::vector<uint64_t>& sums = pair_sums[pair_idx];
+    std::vector<uint64_t>& counts = pair_counts[pair_idx];
+    int i = idx_mapping[pair_idx].first;
+    int j = idx_mapping[pair_idx].second;
+    int i_card = col_sums[i].size();
+    int j_card = col_sums[j].size();
+    bool header_printed = false;
+    for (int k = value_start_idx; k < i_card; k++) {
+      for (int l = value_start_idx; l < j_card; l++) {
+        int idx = k * j_card + l;
+        if (counts[idx] < count_thresh) {
+          continue;
+        }
+        double group_avg = (double)sums[idx] / counts[idx];
+        double i_avg = (double)col_sums[i][k] / col_counts[i][k];
+        double j_avg = (double)col_sums[j][l] / col_counts[j][l];
+        double i_dev = col_devs[i][k] / sqrt(counts[idx]);
+        double j_dev = col_devs[j][l] / sqrt(counts[idx]);
+        double i_z_score = (group_avg - i_avg) / i_dev;
+        double j_z_score = (group_avg - j_avg) / j_dev;
+        if (std::abs(i_z_score) > z_thresh && std::abs(j_z_score) > z_thresh) {
+          if (!header_printed) {
+            printf("%s/%s:\n", table->schema()->field(orig_col_idx[i])->name().c_str(),
+              table->schema()->field(orig_col_idx[j])->name().c_str());
+            header_printed = true;
           }
-          double group_avg = (double)sums[idx] / counts[idx];
-          double i_avg = (double)col_sums[i][k] / col_counts[i][k];
-          double j_avg = (double)col_sums[j][l] / col_counts[j][l];
-          double i_dev = col_devs[i][k] / sqrt(counts[idx]);
-          double j_dev = col_devs[j][l] / sqrt(counts[idx]);
-          double i_z_score = (group_avg - i_avg) / i_dev;
-          double j_z_score = (group_avg - j_avg) / j_dev;
-          if (std::abs(i_z_score) > z_thresh && std::abs(j_z_score) > z_thresh) {
-            if (!header_printed) {
-              printf("%s/%s:\n", table->schema()->field(orig_col_idx[i])->name().c_str(),
-                table->schema()->field(orig_col_idx[j])->name().c_str());
-              header_printed = true;
+          if (k == 0) {
+            printf("  NULL/");
+          } else {
+            if (double_mappings.find(i) != double_mappings.end()) {
+              printf("  %.2f/", double_mappings[i][k - 1]);
+            } else if (int_mappings.find(i) != int_mappings.end()) {
+              printf("  %" PRId64 "/", int_mappings[i][k - 1]);
+            } else if (string_mappings.find(i) != string_mappings.end()) {
+              printf("  %s/", string_mappings[i][k - 1].c_str());
+            } else { // continuous
+              printf("  %d/", k - 1);
             }
-            if (k == 0) {
-              printf("  NULL/");
-            } else {
-              if (double_mappings.find(i) != double_mappings.end()) {
-                printf("  %.2f/", double_mappings[i][k - 1]);
-              } else if (int_mappings.find(i) != int_mappings.end()) {
-                printf("  %" PRId64 "/", int_mappings[i][k - 1]);
-              } else if (string_mappings.find(i) != string_mappings.end()) {
-                printf("  %s/", string_mappings[i][k - 1].c_str());
-              } else { // continuous
-                printf("  %d/", k - 1);
-              }
-            }
-            if (l == 0) {
-              printf("NULL: ");
-            } else {
-              if (double_mappings.find(j) != double_mappings.end()) {
-                printf("%.2f: ", double_mappings[j][l - 1]);
-              } else if (int_mappings.find(j) != int_mappings.end()) {
-                printf("%" PRId64 ": ", int_mappings[j][l - 1]);
-              } else if (string_mappings.find(j) != string_mappings.end()) {
-                printf("%s: ", string_mappings[j][l - 1].c_str());
-              } else { // continuous
-                printf("%d: ", l - 1);
-              }
-            }
-            double smaller_z = i_z_score;
-            if (std::abs(j_z_score) < std::abs(i_z_score)) {
-              smaller_z = j_z_score;
-            }
-            printf("%.2f (z:%.4f, #:%" PRIu64 ")\n", group_avg, smaller_z, counts[idx]);
           }
+          if (l == 0) {
+            printf("NULL: ");
+          } else {
+            if (double_mappings.find(j) != double_mappings.end()) {
+              printf("%.2f: ", double_mappings[j][l - 1]);
+            } else if (int_mappings.find(j) != int_mappings.end()) {
+              printf("%" PRId64 ": ", int_mappings[j][l - 1]);
+            } else if (string_mappings.find(j) != string_mappings.end()) {
+              printf("%s: ", string_mappings[j][l - 1].c_str());
+            } else { // continuous
+              printf("%d: ", l - 1);
+            }
+          }
+          double smaller_z = i_z_score;
+          if (std::abs(j_z_score) < std::abs(i_z_score)) {
+            smaller_z = j_z_score;
+          }
+          printf("%.2f (z:%.4f, #:%" PRIu64 ")\n", group_avg, smaller_z, counts[idx]);
         }
       }
     }
