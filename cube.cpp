@@ -267,7 +267,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   std::vector<std::vector<uint64_t>> col_sums(cols.size());
   std::vector<std::vector<uint64_t>> col_counts(cols.size());
   std::vector<std::vector<double>> col_devs(cols.size());
-  int value_start_idx = show_nulls ? 0 : 1;
+  #pragma omp parallel for
   for (int i = 0; i < cols.size(); i++) {
     int size;
     if (double_mappings.find(i) != double_mappings.end()) {
@@ -287,8 +287,28 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
       sums[col[j]] += metric_col[j];
       counts[col[j]]++;
     }
+    std::vector<double> devs(size);
+    for (int64_t j = 0; j < num_rows; j++) {
+      if (counts[col[j]] < count_thresh) {
+        continue;
+      }
+      double group_avg = (double)sums[col[j]] / counts[col[j]];
+      devs[col[j]] += pow(metric_col[j] - group_avg, 2);
+    }
+    for (int j = 0; j < size; j++) {
+      devs[j] = sqrt(devs[j] / counts[j]);
+    }
+    col_sums[i] = std::move(sums);
+    col_counts[i] = std::move(counts);
+    col_devs[i] = std::move(devs);
+  }
+
+  int value_start_idx = show_nulls ? 0 : 1;
+  for (int i = 0; i < cols.size(); i++) {
+    std::vector<uint64_t>& sums = col_sums[i];
+    std::vector<uint64_t>& counts = col_counts[i];
     bool header_printed = false;
-    for (int j = value_start_idx; j < size; j++) {
+    for (int j = value_start_idx; j < sums.size(); j++) {
       if (counts[j] < count_thresh) {
         continue;
       }
@@ -316,20 +336,6 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
         printf("%.2f (z:%.4f, #:%" PRIu64 ")\n", group_avg, z_score, counts[j]);
       }
     }
-    std::vector<double> devs(size);
-    for (int64_t j = 0; j < num_rows; j++) {
-      if (counts[col[j]] < count_thresh) {
-        continue;
-      }
-      double group_avg = (double)sums[col[j]] / counts[col[j]];
-      devs[col[j]] += pow(metric_col[j] - group_avg, 2);
-    }
-    for (int j = 0; j < size; j++) {
-      devs[j] = sqrt(devs[j] / counts[j]);
-    }
-    col_sums[i] = std::move(sums);
-    col_counts[i] = std::move(counts);
-    col_devs[i] = std::move(devs);
   }
   printf("\n***2D stats***\n");
   for (int i = 0; i < cols.size(); i++) {
