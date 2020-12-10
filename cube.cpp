@@ -8,6 +8,7 @@
 #include <set>
 #include <map>
 #include <inttypes.h>
+#include <sys/time.h>
 
 extern "C" void compute_stats(PyObject *, int, double, int, int);
 
@@ -106,7 +107,9 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   std::vector<std::vector<double>> double_mappings_init(num_fields);
   std::vector<std::vector<int64_t>> int_mappings_init(num_fields);
   std::vector<std::vector<std::string>> string_mappings_init(num_fields);
+  struct timeval start, end, diff;
   printf("***Columns***\n");
+  gettimeofday(&start, 0);
   #pragma omp parallel for schedule(dynamic)
   for (int i = 0; i < table->schema()->num_fields(); i++) {
     auto f = table->schema()->field(i);
@@ -250,6 +253,9 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
       printf("  continuous (%.2f-%.2f)\n", min_max_init[i].first, min_max_init[i].second);
     }
   }
+  gettimeofday(&end, 0);
+  timersub(&end, &start, &diff);
+  printf("Columns time: %ld.%06ld\n", (long)diff.tv_sec, (long)diff.tv_usec);
 
   uint64_t global_sum = 0;
   for (int64_t i = 0; i < num_rows; i++) {
@@ -267,6 +273,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   std::vector<std::vector<uint64_t>> col_sums(cols.size());
   std::vector<std::vector<uint64_t>> col_counts(cols.size());
   std::vector<std::vector<double>> col_devs(cols.size());
+  gettimeofday(&start, 0);
   #pragma omp parallel for
   for (int i = 0; i < cols.size(); i++) {
     int size;
@@ -337,9 +344,14 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
       }
     }
   }
+  gettimeofday(&end, 0);
+  timersub(&end, &start, &diff);
+  printf("1D time: %ld.%06ld\n", (long)diff.tv_sec, (long)diff.tv_usec);
+
   printf("\n***2D stats***\n");
   std::vector<std::vector<uint64_t>> pair_sums(cols.size() * (cols.size() - 1) / 2);
   std::vector<std::vector<uint64_t>> pair_counts(pair_sums.size());
+  gettimeofday(&start, 0);
   #pragma omp parallel for collapse(2)
   for (int i = 0; i < cols.size(); i++) {
     for (int j = i + 1; j < cols.size(); j++) {
@@ -425,4 +437,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
       }
     }
   }
+  gettimeofday(&end, 0);
+  timersub(&end, &start, &diff);
+  printf("2D time: %ld.%06ld\n", (long)diff.tv_sec, (long)diff.tv_usec);
 }
