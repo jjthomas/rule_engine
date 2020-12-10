@@ -338,6 +338,9 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
     }
   }
   printf("\n***2D stats***\n");
+  std::vector<std::vector<uint64_t>> pair_sums(cols.size() * (cols.size() - 1) / 2);
+  std::vector<std::vector<uint64_t>> pair_counts(pair_sums.size());
+  #pragma omp parallel for collapse(2)
   for (int i = 0; i < cols.size(); i++) {
     for (int j = i + 1; j < cols.size(); j++) {
       int i_card = col_sums[i].size();
@@ -351,6 +354,21 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
         sums[idx] += metric_col[k];
         counts[idx]++;
       }
+      // subtract off the remaining triangle and add index in current triangle row
+      int pair_idx = pair_sums.size() - (cols.size() - i) * (cols.size() - i - 1) / 2
+        + (j - (i + 1));
+      pair_sums[pair_idx] = std::move(sums);
+      pair_counts[pair_idx] = std::move(counts);
+    }
+  }
+  for (int i = 0; i < cols.size(); i++) {
+    for (int j = i + 1; j < cols.size(); j++) {
+      int pair_idx = pair_sums.size() - (cols.size() - i) * (cols.size() - i - 1) / 2
+        + (j - (i + 1));
+      std::vector<uint64_t>& sums = pair_sums[pair_idx];
+      std::vector<uint64_t>& counts = pair_counts[pair_idx];
+      int i_card = col_sums[i].size();
+      int j_card = col_sums[j].size();
       bool header_printed = false;
       for (int k = value_start_idx; k < i_card; k++) {
         for (int l = value_start_idx; l < j_card; l++) {
