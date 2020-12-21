@@ -40,7 +40,9 @@ bool categorical(const T *data, int64_t len, const uint8_t *null_map, int limit)
 template <typename T>
 void enumerate_cat(const T *data, int64_t len, const uint8_t *null_map,
   std::vector<uint8_t>& result, std::vector<T> &rev_mapping) {
-  uint8_t cur_id = 1;
+  bool has_null = null_map != nullptr;
+  // save 0 id for null if it is present
+  uint8_t cur_id = has_null ? 1 : 0;
   std::map<T, uint8_t> mapping;
   for (int64_t i = 0; i < len; i++) {
     if (not_null(null_map, i)) {
@@ -54,7 +56,7 @@ void enumerate_cat(const T *data, int64_t len, const uint8_t *null_map,
   }
   rev_mapping.resize(mapping.size());
   for (std::pair<T, uint8_t> e : mapping) {
-    rev_mapping[e.second - 1] = e.first;
+    rev_mapping[has_null ? e.second - 1 : e.second] = e.first;
   }
 }
 
@@ -213,6 +215,8 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   std::pair<double, double> metric_min_max = min_max_init[metric_idx];
 
   std::vector<std::vector<uint8_t>> cols;
+  std::vector<int> sizes;
+  std::vector<bool> has_nulls;
   std::vector<int> orig_col_idx;
   std::map<int, std::pair<double, double>> min_max;
   std::map<int, std::vector<double>> double_mappings;
@@ -233,22 +237,42 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
       }
     } else if (col_status[i] == CONT || col_status[i] == CAT) {
       int cur_col = cols.size();
+      int size;
+      bool has_null;
       if (col_status[i] == CONT) {
         min_max[cur_col] = min_max_init[i];
+        size = DISC_COUNT + 1; // always has null
+        has_null = true;
       } else {
+        has_null = table->column(i)->null_count() > 0;
+        size = has_null ? 1 : 0;
         if (f->type()->id() == arrow::Type::type::DOUBLE) {
           double_mappings[cur_col] = std::move(double_mappings_init[i]);
+          size += double_mappings[cur_col].size();
         } else if (f->type()->id() == arrow::Type::type::INT64) {
           int_mappings[cur_col] = std::move(int_mappings_init[i]);
+          size += int_mappings[cur_col].size();
         } else { // string
           string_mappings[cur_col] = std::move(string_mappings_init[i]);
+          size += string_mappings[cur_col].size();
         }
       }
       orig_col_idx.push_back(i);
       cols.push_back(std::move(cols_init[i]));
+      sizes.push_back(size);
+      has_nulls.push_back(has_null);
     }
     if (col_status[i] == CAT) {
-      printf("  categorical\n");
+      printf("  categorical");
+      if (i != metric_idx) {
+        printf(" (%d", sizes.back());
+        if (has_nulls.back()) {
+          printf(", incl. null)");
+        } else {
+          printf(")");
+        }
+      }
+      printf("\n");
     } else if (col_status[i] == CONT) {
       printf("  continuous (%.2f-%.2f)\n", min_max_init[i].first, min_max_init[i].second);
     }
@@ -276,17 +300,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   gettimeofday(&start, 0);
   #pragma omp parallel for
   for (int i = 0; i < cols.size(); i++) {
-    int size;
-    if (double_mappings.find(i) != double_mappings.end()) {
-      size = double_mappings[i].size();
-    } else if (int_mappings.find(i) != int_mappings.end()) {
-      size = int_mappings[i].size();
-    } else if (string_mappings.find(i) != string_mappings.end()) {
-      size = string_mappings[i].size();
-    } else { // continuous
-      size = DISC_COUNT;
-    }
-    size += 1; // account for null
+    int size = sizes[i];
     std::vector<uint64_t> sums(size);
     std::vector<uint64_t> counts(size);
     std::vector<uint8_t>& col = cols[i];
@@ -310,11 +324,12 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
     col_devs[i] = std::move(devs);
   }
 
-  int value_start_idx = show_nulls ? 0 : 1;
+  int null_start = show_nulls ? 0 : 1;
   for (int i = 0; i < cols.size(); i++) {
     std::vector<uint64_t>& sums = col_sums[i];
     std::vector<uint64_t>& counts = col_counts[i];
     bool header_printed = false;
+    int value_start_idx = has_nulls[i] ? null_start : 0;
     for (int j = value_start_idx; j < sums.size(); j++) {
       if (counts[j] < count_thresh) {
         continue;
@@ -327,17 +342,18 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
           printf("%s:\n", table->schema()->field(orig_col_idx[i])->name().c_str());
           header_printed = true;
         }
-        if (j == 0) {
+        if (j == 0 && has_nulls[i]) {
           printf("  NULL: ");
         } else {
+          int idx = has_nulls[i] ? j - 1 : j;
           if (double_mappings.find(i) != double_mappings.end()) {
-            printf("  %.2f: ", double_mappings[i][j - 1]);
+            printf("  %.2f: ", double_mappings[i][idx]);
           } else if (int_mappings.find(i) != int_mappings.end()) {
-            printf("  %" PRId64 ": ", int_mappings[i][j - 1]);
+            printf("  %" PRId64 ": ", int_mappings[i][idx]);
           } else if (string_mappings.find(i) != string_mappings.end()) {
-            printf("  %s: ", string_mappings[i][j - 1].c_str());
+            printf("  %s: ", string_mappings[i][idx].c_str());
           } else { // continuous
-            printf("  %d: ", j - 1);
+            printf("  %d: ", idx);
           }
         }
         printf("%.2f (z:%.4f, #:%" PRIu64 ")\n", group_avg, z_score, counts[j]);
@@ -384,8 +400,10 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
     int i_card = col_sums[i].size();
     int j_card = col_sums[j].size();
     bool header_printed = false;
-    for (int k = value_start_idx; k < i_card; k++) {
-      for (int l = value_start_idx; l < j_card; l++) {
+    int i_value_start_idx = has_nulls[i] ? null_start : 0;
+    int j_value_start_idx = has_nulls[j] ? null_start : 0;
+    for (int k = i_value_start_idx; k < i_card; k++) {
+      for (int l = j_value_start_idx; l < j_card; l++) {
         int idx = k * j_card + l;
         if (counts[idx] < count_thresh) {
           continue;
@@ -403,30 +421,32 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
               table->schema()->field(orig_col_idx[j])->name().c_str());
             header_printed = true;
           }
-          if (k == 0) {
+          if (k == 0 && has_nulls[i]) {
             printf("  NULL/");
           } else {
+            int i_idx = has_nulls[i] ? k - 1 : k;
             if (double_mappings.find(i) != double_mappings.end()) {
-              printf("  %.2f/", double_mappings[i][k - 1]);
+              printf("  %.2f/", double_mappings[i][i_idx]);
             } else if (int_mappings.find(i) != int_mappings.end()) {
-              printf("  %" PRId64 "/", int_mappings[i][k - 1]);
+              printf("  %" PRId64 "/", int_mappings[i][i_idx]);
             } else if (string_mappings.find(i) != string_mappings.end()) {
-              printf("  %s/", string_mappings[i][k - 1].c_str());
+              printf("  %s/", string_mappings[i][i_idx].c_str());
             } else { // continuous
-              printf("  %d/", k - 1);
+              printf("  %d/", i_idx);
             }
           }
-          if (l == 0) {
+          if (l == 0 && has_nulls[j]) {
             printf("NULL: ");
           } else {
+            int j_idx = has_nulls[j] ? l - 1 : l;
             if (double_mappings.find(j) != double_mappings.end()) {
-              printf("%.2f: ", double_mappings[j][l - 1]);
+              printf("%.2f: ", double_mappings[j][j_idx]);
             } else if (int_mappings.find(j) != int_mappings.end()) {
-              printf("%" PRId64 ": ", int_mappings[j][l - 1]);
+              printf("%" PRId64 ": ", int_mappings[j][j_idx]);
             } else if (string_mappings.find(j) != string_mappings.end()) {
-              printf("%s: ", string_mappings[j][l - 1].c_str());
+              printf("%s: ", string_mappings[j][j_idx].c_str());
             } else { // continuous
-              printf("%d: ", l - 1);
+              printf("%d: ", j_idx);
             }
           }
           double smaller_z = i_z_score;
