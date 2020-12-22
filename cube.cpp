@@ -203,6 +203,25 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
         }
         break;
       }
+      case arrow::Type::type::BOOL: {
+        auto arr = std::static_pointer_cast<arrow::BooleanArray>(table->column(i)->chunk(0));
+        col_status[i] = CAT;
+        cols_init[i] = std::vector<uint8_t>(num_rows);
+        std::vector<uint8_t>& col = cols_init[i];
+        int null_offset = arr->null_count() > 0 ? 1 : 0;
+        for (int64_t j = 0; j < arr->length(); j++) {
+          if (arr->IsNull(j)) {
+            if (i == metric_idx) {
+              printf("ERROR: null metric value at row %" PRId64 "\n", j);
+              col_status[i] = METRIC_ERROR;
+              break;
+            }
+            col[j] = 0;
+          } else {
+            col[j] = null_offset + (arr->Value(j) ? 1 : 0);
+          }
+        }
+      }
       default:
         col_status[i] = BAD_TYPE;
     }
@@ -222,6 +241,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   std::map<int, std::vector<double>> double_mappings;
   std::map<int, std::vector<int64_t>> int_mappings;
   std::map<int, std::vector<std::string>> string_mappings;
+  std::set<int> bool_cols;
   for (int i = 0; i < table->schema()->num_fields(); i++) {
     auto f = table->schema()->field(i);
     printf("%s: %s\n", f->name().c_str(), f->type()->ToString().c_str());
@@ -252,9 +272,12 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
         } else if (f->type()->id() == arrow::Type::type::INT64) {
           int_mappings[cur_col] = std::move(int_mappings_init[i]);
           size += int_mappings[cur_col].size();
-        } else { // string
+        } else if (f->type()->id() == arrow::Type::type::STRING) {
           string_mappings[cur_col] = std::move(string_mappings_init[i]);
           size += string_mappings[cur_col].size();
+        } else { // bool
+          bool_cols.insert(cur_col);
+          size += 2;
         }
       }
       orig_col_idx.push_back(i);
@@ -352,6 +375,8 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
             printf("  %" PRId64 ": ", int_mappings[i][idx]);
           } else if (string_mappings.find(i) != string_mappings.end()) {
             printf("  %s: ", string_mappings[i][idx].c_str());
+          } else if (bool_cols.find(i) != bool_cols.end()) {
+            printf("  %s: ", idx == 0 ? "false" : "true");
           } else { // continuous
             printf("  %d: ", idx);
           }
@@ -431,6 +456,8 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
               printf("  %" PRId64 "/", int_mappings[i][i_idx]);
             } else if (string_mappings.find(i) != string_mappings.end()) {
               printf("  %s/", string_mappings[i][i_idx].c_str());
+            } else if (bool_cols.find(i) != bool_cols.end()) {
+              printf("  %s/", i_idx == 0 ? "false" : "true");
             } else { // continuous
               printf("  %d/", i_idx);
             }
@@ -445,6 +472,8 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
               printf("%" PRId64 ": ", int_mappings[j][j_idx]);
             } else if (string_mappings.find(j) != string_mappings.end()) {
               printf("%s: ", string_mappings[j][j_idx].c_str());
+            } else if (bool_cols.find(j) != bool_cols.end()) {
+              printf("%s: ", j_idx == 0 ? "false" : "true");
             } else { // continuous
               printf("%d: ", j_idx);
             }
