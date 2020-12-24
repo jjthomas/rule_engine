@@ -12,6 +12,10 @@
 
 extern "C" void compute_stats(PyObject *, int, double, int, int);
 
+#ifdef ACC
+extern "C" void compute2d_acc(uint8_t **, int, int, uint8_t *, uint32_t *);
+#endif
+
 #define STRING_CARD_LIMIT 100
 #define NUM_CARD_LIMIT 50
 #define DISC_COUNT 15
@@ -91,6 +95,112 @@ std::pair<double, double> discretize_cont(const T *data, int64_t len,
 
   return std::make_pair((double)min, (double)max);
 }
+
+#ifdef ACC
+int bits_for_size(int size) {
+  for (int i = 1; i < 31; i++) {
+    if (1 << i >= size) {
+      return i;
+    }
+  }
+  return 31;
+}
+
+std::pair<std::vector<uint64_t>, std::vector<uint64_t>>
+run_acc(std::vector<std::vector<uint8_t>> cols, std::vector<uint8_t> metric) {
+  std::vector<uint64_t> sums(256 * cols.size() * (cols.size() + 1) / 2);
+  std::vector<uint64_t> counts(sums.size());
+  std::vector<uint32_t> acc_stats(2 * sums.size());
+  int chunk_size = 1 << 24; // avoid overflow in acc 32-bit metric sums
+  std::vector<uint8_t *> col_ptrs(cols.size());
+  for (int64_t i = 0; i < cols[0].size(); i += chunk_size) {
+    for (int j = 0; j < cols.size(); j++) {
+      col_ptrs[j] = cols[j].data() + i;
+    }
+    compute2d_acc(col_ptrs.data(), std::min<int64_t>(chunk_size, cols[0].size() - i),
+      cols.size(), metric.data() + i, acc_stats.data());
+    for (int j = 0; j < sums.size(); j++) {
+      sums[j] += acc_stats[2 * j];
+      counts[j] += acc_stats[2 * j + 1];
+    }
+  }
+  return std::make_pair(std::move(sums), std::move(counts));
+}
+
+// pack and split cols into 4-bit cols for accelerator
+std::pair<std::vector<std::vector<uint8_t>>, std::vector<std::pair<int, int>>>
+encode_acc(std::vector<std::vector<uint8_t>> cols, std::vector<int>& sizes) {
+  std::vector<std::tuple<int, int, int>> size_idx;
+  for (int i = 0; i < sizes.size(); i++) {
+    size_idx.emplace_back(sizes[i], bits_for_size(sizes[i]), i);
+  }
+  std::sort(size_idx.begin(), size_idx.end());
+  std::vector<std::tuple<int, bool, int, int>> processing_points;
+  int num_new_cols = 0;
+  int cur_start = 0;
+  int cur_bits = 0;
+  for (int i = 0; i < size_idx.size(); i++) {
+    cur_bits += std::get<1>(size_idx[i]);
+    if (i == size_idx.size() - 1 || cur_bits + std::get<1>(size_idx[i + 1]) > 4) {
+      if (i == cur_start) { // split or unmodified
+        // 15 values per column if we need to split
+        int cur_new_cols = std::get<0>(size_idx[i]) > 16 ? (std::get<0>(size_idx[i]) + 14) / 15 : 1;
+        processing_points.emplace_back(i, false, num_new_cols, cur_new_cols);
+        num_new_cols += cur_new_cols;
+      } else { // merge
+        processing_points.emplace_back(cur_start, true, num_new_cols, i - cur_start + 1);
+        num_new_cols++;
+      }
+      cur_start = i + 1;
+      cur_bits = 0;
+    }
+  }
+  std::vector<std::pair<int, int>> mapping(size_idx.size());
+  std::vector<std::vector<uint8_t>> new_cols(num_new_cols);
+  #pragma omp parallel for schedule(dynamic)
+  for (int i = 0; i < processing_points.size(); i++) {
+    int sorted_pos, new_pos, cnt;
+    bool merge;
+    std::tie(sorted_pos, merge, new_pos, cnt) = processing_points[i];
+    if (!merge) {
+      int orig_idx = std::get<2>(size_idx[sorted_pos]);
+      mapping[orig_idx] = std::make_pair(new_pos, -1);
+      std::vector<uint8_t>& cur_col = cols[orig_idx];
+      if (cnt == 1) {
+        new_cols[new_pos] = std::move(cur_col);
+      } else {
+        std::vector<std::vector<uint8_t>> split_cols(cnt);
+        for (int j = 0; j < cnt; j++) {
+          split_cols[j] = std::vector<uint8_t>(cur_col.size());
+        }
+        for (int64_t j = 0; j < cur_col.size(); j++) {
+          int split_col = cur_col[j] / 15;
+          // 0 idx indicates empty
+          int split_idx = cur_col[j] % 15 + 1;
+          split_cols[split_col][j] = split_idx;
+        }
+        for (int j = 0; j < cnt; j++) {
+          new_cols[new_pos + j] = std::move(split_cols[j]);
+        }
+      }
+    } else {
+      std::vector<uint8_t> merged_col(cols[0].size());
+      int cur_shift = 0;
+      for (int j = 0; j < cnt; j++) {
+        int orig_idx = std::get<2>(size_idx[sorted_pos + j]);
+        mapping[orig_idx] = std::make_pair(new_pos, cur_shift);
+        std::vector<uint8_t>& cur_col = cols[orig_idx];
+        for (int64_t k = 0; k < cur_col.size(); k++) {
+          merged_col[k] |= cur_col[k] << cur_shift;
+        }
+        cur_shift += std::get<1>(size_idx[sorted_pos + j]);
+      }
+      new_cols[new_pos] = std::move(merged_col);
+    }
+  }
+  return std::make_pair(std::move(new_cols), std::move(mapping));
+}
+#endif
 
 enum ColStatus {
   CONT, CAT, BAD_TYPE, STRING_HIGH_CARD, METRIC_ERROR
@@ -399,12 +509,86 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
     }
   }
   gettimeofday(&start, 0);
+#ifdef ACC
+  std::vector<std::vector<uint8_t>> new_cols;
+  std::vector<std::pair<int, int>> new_mapping;
+  std::tie(new_cols, new_mapping) = encode_acc(std::move(cols), sizes);
+  int num_new_cols = new_cols.size();
+  std::vector<uint64_t> acc_sums, acc_counts;
+  std::tie(acc_sums, acc_counts) = run_acc(std::move(new_cols), std::move(metric_col));
+  for (int pair_idx = 0; pair_idx < pair_sums.size(); pair_idx++) {
+    int i = idx_mapping[pair_idx].first;
+    int j = idx_mapping[pair_idx].second;
+    int i_card = sizes[i];
+    int j_card = sizes[j];
+    std::vector<uint64_t> sums(i_card * j_card);
+    std::vector<uint64_t> counts(i_card * j_card);
+    for (int k = 0; k < i_card; k++) {
+      for (int l = 0; l < j_card; l++) {
+        int i_new_col, j_new_col, i_pos, j_pos;
+        std::tie(i_new_col, i_pos) = new_mapping[i];
+        std::tie(j_new_col, j_pos) = new_mapping[j];
+        std::vector<int> i_vals, j_vals;
+        if (i_pos == -1) { // split or unmodified col
+          if (i_card > 16) {
+            i_new_col += k / 15;
+            i_vals.push_back(k % 15 + 1);
+          } else {
+            i_vals.push_back(k);
+          }
+        } else { // merged col
+          int bits = bits_for_size(i_card);
+          for (int m = 0; m < 16; m++) {
+            if (((m >> i_pos) & ((1 << bits) - 1)) == k) {
+              i_vals.push_back(m);
+            }
+          }
+        }
+        if (j_pos == -1) { // split or unmodified col
+          if (j_card > 16) {
+            j_new_col += l / 15;
+            j_vals.push_back(l % 15 + 1);
+          } else {
+            j_vals.push_back(l);
+          }
+        } else { // merged col
+          int bits = bits_for_size(j_card);
+          for (int m = 0; m < 16; m++) {
+            if (((m >> j_pos) & ((1 << bits) - 1)) == l) {
+              j_vals.push_back(m);
+            }
+          }
+        }
+        if (i_new_col > j_new_col) { // we only have the triangle
+          std::swap(i_new_col, j_new_col);
+          std::swap(i_vals, j_vals);
+        }
+        // go from triangle position (i_new_col, j_new_col) to linear position
+        int remaining_triangle_base = num_new_cols - i_new_col;
+        int acc_hist_idx = (num_new_cols + 1) * num_new_cols / 2 -
+          (remaining_triangle_base + 1) * remaining_triangle_base / 2 +
+          (j_new_col - i_new_col);
+        int acc_hist_offset = acc_hist_idx * 256;
+        int cur_idx = k * j_card + l;
+        for (int i_val : i_vals) {
+          for (int j_val : j_vals) {
+            int acc_idx = i_val * 16 + j_val;
+            sums[cur_idx] += acc_sums[acc_hist_offset + acc_idx];
+            counts[cur_idx] += acc_counts[acc_hist_offset + acc_idx];
+          }
+        }
+      }
+    }
+    pair_sums[pair_idx] = std::move(sums);
+    pair_counts[pair_idx] = std::move(counts);
+  }
+#else
   #pragma omp parallel for
   for (int pair_idx = 0; pair_idx < pair_sums.size(); pair_idx++) {
     int i = idx_mapping[pair_idx].first;
     int j = idx_mapping[pair_idx].second;
-    int i_card = col_sums[i].size();
-    int j_card = col_sums[j].size();
+    int i_card = sizes[i];
+    int j_card = sizes[j];
     std::vector<uint64_t> sums(i_card * j_card);
     std::vector<uint64_t> counts(i_card * j_card);
     std::vector<uint8_t>& i_col = cols[i];
@@ -417,13 +601,14 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
     pair_sums[pair_idx] = std::move(sums);
     pair_counts[pair_idx] = std::move(counts);
   }
+#endif
   for (int pair_idx = 0; pair_idx < pair_sums.size(); pair_idx++) {
     std::vector<uint64_t>& sums = pair_sums[pair_idx];
     std::vector<uint64_t>& counts = pair_counts[pair_idx];
     int i = idx_mapping[pair_idx].first;
     int j = idx_mapping[pair_idx].second;
-    int i_card = col_sums[i].size();
-    int j_card = col_sums[j].size();
+    int i_card = sizes[i];
+    int j_card = sizes[j];
     bool header_printed = false;
     int i_value_start_idx = has_nulls[i] ? null_start : 0;
     int j_value_start_idx = has_nulls[j] ? null_start : 0;
