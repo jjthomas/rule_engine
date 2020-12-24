@@ -17,7 +17,7 @@ if [[ "$SIM" == "1" || "$GPU" == "1" || "$FPGA" == 1 ]]; then
   DEFINES="-DACC"
 fi
 if [[ "$SIM" == "1" ]]; then
-  $CC -std=c++11 -fopenmp -c sim.cpp -o sim.o
+  $CC -std=c++11 -fopenmp -fPIC -c sim.cpp -o sim.o
   EXTRA_FILES="sim.o"
 fi
 $CC -std=c++11 -fopenmp $DEFINES -I$PA_INC -I$PY_INC -fPIC cube.cpp $EXTRA_FILES -shared -o libcube $PA_LIB $PY_LIB $OMP_LIB -larrow -larrow_python $PY_LIB_NAME
