@@ -25,5 +25,10 @@ if [[ "$GPU" == "1" ]]; then
   EXTRA_FILES="gpu.o"
   EXTRA_LINK="-L/usr/local/cuda/lib64 -lcudart -lcuda"
 fi
+if [[ "$FPGA" == "1" ]]; then
+  $CC -std=c++11 -fopenmp -I$F1_SDK/userspace/include -fPIC -c fpga.cpp -o fpga.o
+  EXTRA_FILES="fpga.o"
+  EXTRA_LINK="-lfpga_mgmt"
+fi
 $CC -std=c++11 -fopenmp $DEFINES -I$PA_INC -I$PY_INC -fPIC cube.cpp $EXTRA_FILES -shared -o libcube $PA_LIB $PY_LIB $OMP_LIB -larrow -larrow_python $PY_LIB_NAME $EXTRA_LINK
 
