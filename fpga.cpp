@@ -10,7 +10,7 @@
 
 extern "C" void compute2d_acc(uint8_t **, int, int, uint8_t *, uint32_t *);
 
-#define BLOCK_SIZE 50
+#define BLOCK_SIZE 48
 
 void run(int read_fd, int write_fd, pci_bar_handle_t pci_bar_handle, uint8_t *input_buf,
   int input_buf_size, uint8_t *output_buf, int output_buf_size) {
@@ -55,8 +55,7 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
       #pragma omp parallel for
       for (int k = 0; k < num_rows; k++) {
         uint8_t *cur_row = input_data + 64 * k;
-        *cur_row = metric[k];
-        cur_row += 4; // skip metric
+        *cur_row++ = metric[k];
         for (int l = i_start_col; l < i_end_col; l++) {
           int off = l - i_start_col;
           int byte = off >> 1;
