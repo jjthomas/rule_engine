@@ -516,6 +516,7 @@ void compute_stats(PyObject *obj, int metric_idx, double z_thresh, int count_thr
   int num_new_cols = new_cols.size();
   std::vector<uint64_t> acc_sums, acc_counts;
   std::tie(acc_sums, acc_counts) = run_acc(std::move(new_cols), std::move(metric_col));
+  #pragma omp parallel for
   for (int pair_idx = 0; pair_idx < pair_sums.size(); pair_idx++) {
     int i = idx_mapping[pair_idx].first;
     int j = idx_mapping[pair_idx].second;
