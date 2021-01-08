@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <algorithm>
+#include <sys/mman.h>
 
 #include "fpga_pci.h"
 #include "fpga_mgmt.h"
@@ -10,6 +11,7 @@
 
 extern "C" void compute2d_acc(uint8_t **, int, int, uint8_t *, uint32_t *);
 
+// The block encoding code is mostly specific to this size
 #define BLOCK_SIZE 48
 
 void run(int read_fd, int write_fd, pci_bar_handle_t pci_bar_handle, uint8_t *input_buf,
@@ -39,38 +41,58 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
   }
 
   int input_buf_size = 64 * (num_rows + 1);
-  uint8_t *input_buf = (uint8_t *)malloc(input_buf_size);
+  uint8_t *input_buf = (uint8_t *)mmap(NULL, input_buf_size, PROT_READ | PROT_WRITE,
+    MAP_ANON | MAP_PRIVATE, -1, 0);
   *((uint32_t *)input_buf) = num_rows; // store length in first line
   uint8_t *input_data = input_buf + 64;
   int output_buf_size = sizeof(uint32_t) * 512 * BLOCK_SIZE * BLOCK_SIZE;
-  uint32_t *output_buf = (uint32_t *)malloc(output_buf_size);
+  uint32_t *output_buf = (uint32_t *)mmap(NULL, output_buf_size,
+    PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+
   int num_blocks = (num_cols + BLOCK_SIZE - 1) / BLOCK_SIZE;
+  std::vector<std::vector<uint64_t>> blocks(num_blocks);
   for (int i = 0; i < num_blocks; i++) {
+    std::vector<uint64_t> block(num_rows * 3); // 24 bytes per block row
+    int start_col = i * BLOCK_SIZE;
+    int end_col = std::min(num_cols, start_col + BLOCK_SIZE);
+    #pragma omp parallel for
+    for (int j = 0; j < num_rows; j++) {
+      for (int k = 0; k < 3; k++) {
+        uint64_t word = 0;
+        for (int l = std::min(end_col, start_col + 16 * (k + 1)) - 1; l >= start_col + 16 * k; l--) {
+          word = (word << 4) | cols[l][j];
+        }
+        block[3 * j + k] = word;
+      }
+    }
+    blocks[i] = std::move(block);
+  }
+  #pragma omp parallel for
+  for (int i = 0; i < num_rows; i++) {
+    input_data[64 * i] = metric[i];
+  }
+  for (int i = 0; i < num_blocks; i++) {
+    #pragma omp parallel for
+    for (int j = 0; j < num_rows; j++) {
+      uint64_t *cur_row = (uint64_t *)(input_data + 64 * j + 1);
+      for (int k = 0; k < 3; k++) {
+        cur_row[k] = blocks[i][3 * j + k];
+      }
+    }
     for (int j = i; j < num_blocks; j++) {
-      int i_start_col = i * BLOCK_SIZE;
-      int j_start_col = j * BLOCK_SIZE;
-      int i_end_col = std::min(num_cols, i_start_col + BLOCK_SIZE);
-      int j_end_col = std::min(num_cols, j_start_col + BLOCK_SIZE);
-      memset(input_data, 0, 64 * num_rows);
       #pragma omp parallel for
       for (int k = 0; k < num_rows; k++) {
-        uint8_t *cur_row = input_data + 64 * k;
-        *cur_row++ = metric[k];
-        for (int l = i_start_col; l < i_end_col; l++) {
-          int off = l - i_start_col;
-          int byte = off >> 1;
-          int shift = off & 1 ? 4 : 0;
-          cur_row[byte] |= cols[l][k] << shift;
-        }
-        for (int l = j_start_col; l < j_end_col; l++) {
-          int off = l - j_start_col + BLOCK_SIZE;
-          int byte = off >> 1;
-          int shift = off & 1 ? 4 : 0;
-          cur_row[byte] |= cols[l][k] << shift;
+        uint64_t *cur_row = (uint64_t *)(input_data + 64 * k + 25);
+        for (int l = 0; l < 3; l++) {
+          cur_row[l] = blocks[j][3 * k + l];
         }
       }
       run(read_fd, write_fd, pci_bar_handle, input_buf, input_buf_size,
         (uint8_t *)output_buf, output_buf_size);
+      int i_start_col = i * BLOCK_SIZE;
+      int j_start_col = j * BLOCK_SIZE;
+      int i_end_col = std::min(num_cols, i_start_col + BLOCK_SIZE);
+      int j_end_col = std::min(num_cols, j_start_col + BLOCK_SIZE);
       for (int k = i_start_col; k < i_end_col; k++) {
         for (int l = i == j ? k : j_start_col; l < j_end_col; l++) {
           int remaining_triangle_base = num_cols - k;
@@ -85,8 +107,8 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
       }
     }
   }
-  free(input_buf);
-  free(output_buf);
+  munmap(input_buf, input_buf_size);
+  munmap(output_buf, output_buf_size);
   close(read_fd);
   close(write_fd);
 }
