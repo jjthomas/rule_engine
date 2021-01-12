@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <algorithm>
+#include <thread>
 #include <sys/mman.h>
 
 #include "fpga_pci.h"
@@ -13,10 +14,29 @@ extern "C" void compute2d_acc(uint8_t **, int, int, uint8_t *, uint32_t *);
 
 // The block encoding code is mostly specific to this size
 #define BLOCK_SIZE 48
+// Must be from 1-4
+#define NUM_WRITE_THREADS 4
 
-void run(int read_fd, int write_fd, pci_bar_handle_t pci_bar_handle, uint8_t *input_buf,
+void write_data(int write_fd, uint8_t *buf, int length, int addr) {
+  fpga_dma_burst_write(write_fd, buf, length, addr);
+}
+
+void run(int read_fd, int write_fds[NUM_WRITE_THREADS], pci_bar_handle_t pci_bar_handle, uint8_t *input_buf,
   int input_buf_size, uint8_t *output_buf, int output_buf_size) {
-  fpga_dma_burst_write(write_fd, input_buf, input_buf_size, 0);
+  if (NUM_WRITE_THREADS == 1) {
+    write_data(write_fds[0], input_buf, input_buf_size, 0);
+  } else {
+    int chunk_size = input_buf_size / NUM_WRITE_THREADS;
+    std::vector<std::thread> threads;
+    for (int i = 0; i < NUM_WRITE_THREADS; i++) {
+      int offset = i * chunk_size;
+      threads.push_back(std::thread(write_data, write_fds[i], input_buf + offset,
+        i == NUM_WRITE_THREADS - 1 ? input_buf_size - offset : chunk_size, offset));
+    }
+    for (auto& t : threads) {
+      t.join();
+    }
+  }
   fpga_pci_poke(pci_bar_handle, 0x600, 1);
   uint32_t reg_peek;
   do {
@@ -31,9 +51,12 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
     printf("ERROR: fpga_mgmt_init()\n");
   }
   int read_fd = fpga_dma_open_queue(FPGA_DMA_XDMA, 0, 0, true);
-  int write_fd = fpga_dma_open_queue(FPGA_DMA_XDMA, 0, 0, false);
-  if (read_fd < 0 || write_fd < 0) {
-    printf("ERROR: unable to get XDMA read or write handle\n");
+  if (read_fd < 0) {
+    printf("ERROR: unable to get XDMA read handle\n");
+  }
+  int write_fds[NUM_WRITE_THREADS];
+  for (int i = 0; i < NUM_WRITE_THREADS; i++) {
+    write_fds[i] = fpga_dma_open_queue(FPGA_DMA_XDMA, 0, i, false);
   }
   pci_bar_handle_t pci_bar_handle = PCI_BAR_HANDLE_INIT;
   if (fpga_pci_attach(0, 0, 0, 0, &pci_bar_handle) != 0) {
@@ -87,7 +110,7 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
           cur_row[l] = blocks[j][3 * k + l];
         }
       }
-      run(read_fd, write_fd, pci_bar_handle, input_buf, input_buf_size,
+      run(read_fd, write_fds, pci_bar_handle, input_buf, input_buf_size,
         (uint8_t *)output_buf, output_buf_size);
       int i_start_col = i * BLOCK_SIZE;
       int j_start_col = j * BLOCK_SIZE;
@@ -110,5 +133,7 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
   munmap(input_buf, input_buf_size);
   munmap(output_buf, output_buf_size);
   close(read_fd);
-  close(write_fd);
+  for (int i = 0; i < NUM_WRITE_THREADS; i++) {
+    close(write_fds[i]);
+  }
 }
