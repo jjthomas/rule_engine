@@ -67,11 +67,11 @@ with `source cube_venv/bin/activate`. On macOS, install llvm with
 
 Build the C++ library with
 `<FLAG> ./build.sh`, where `<FLAG>` can be `SIM=1` (CPU), `GPU=1` or
-`FPGA=1` depending on the desired accelerator. The GPU build requires
-the `nvcc` compiler, which should be available in any GPU-specific
-AMI on EC2, such as the deep learning AMIs. If there are complaints about
+`FPGA=1` depending on the desired accelerator. If there are complaints about
 missing `Python.h`, you may need to install the package `python3-dev` or
-`python3-devel`.
+`python3-devel`. The GPU build requires
+the `nvcc` compiler, which should be available in any GPU-specific
+AMI on EC2, such as the deep learning AMIs. Details on the FPGA build are below.
 
 Modify rookies.py to load your dataset. Pass in the dataset, desired metric
 column, `z_thresh`, `count_thresh`, and whether results with a null column value
