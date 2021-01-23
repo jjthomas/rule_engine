@@ -22,28 +22,35 @@ void write_data(int write_fd, uint8_t *buf, int length, int addr) {
 }
 
 void run(int read_fd, int write_fds[NUM_WRITE_THREADS], pci_bar_handle_t pci_bar_handle, uint8_t *input_buf,
-  int input_buf_size, uint8_t *output_buf, int output_buf_size) {
-  if (NUM_WRITE_THREADS == 1) {
-    write_data(write_fds[0], input_buf, input_buf_size, 0);
-  } else {
-    int chunk_size = input_buf_size / NUM_WRITE_THREADS;
-    std::vector<std::thread> threads;
-    for (int i = 0; i < NUM_WRITE_THREADS; i++) {
-      int offset = i * chunk_size;
-      threads.push_back(std::thread(write_data, write_fds[i], input_buf + offset,
-        i == NUM_WRITE_THREADS - 1 ? input_buf_size - offset : chunk_size, offset));
-    }
-    for (auto& t : threads) {
-      t.join();
+  int input_buf_size, uint8_t *output_buf, int output_buf_size, bool buf_c) {
+  if (input_buf != NULL) {
+    if (NUM_WRITE_THREADS == 1) {
+      write_data(write_fds[0], input_buf, input_buf_size, 0);
+    } else {
+      int chunk_size = input_buf_size / NUM_WRITE_THREADS;
+      std::vector<std::thread> threads;
+      for (int i = 0; i < NUM_WRITE_THREADS; i++) {
+        int offset = i * chunk_size;
+        threads.push_back(std::thread(write_data, write_fds[i], input_buf + offset,
+          i == NUM_WRITE_THREADS - 1 ? input_buf_size - offset : chunk_size, offset));
+      }
+      for (auto& t : threads) {
+        t.join();
+      }
     }
   }
-  fpga_pci_poke(pci_bar_handle, 0x600, 1);
   uint32_t reg_peek;
   do {
     fpga_pci_peek(pci_bar_handle, 0x600, &reg_peek);
     usleep(1000);
   } while (reg_peek != 0);
-  fpga_dma_burst_read(read_fd, output_buf, output_buf_size, 1000000000);
+  fpga_pci_poke(pci_bar_handle, 0x800, buf_c ? 1 : 0);
+  if (input_buf != NULL) {
+    fpga_pci_poke(pci_bar_handle, 0x600, 1);
+  }
+  if (output_buf != NULL) {
+    fpga_dma_burst_read(read_fd, output_buf, output_buf_size, 1000000000);
+  }
 }
 
 void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, uint32_t *stats) {
@@ -94,6 +101,10 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
   for (int i = 0; i < num_rows; i++) {
     input_data[64 * i] = metric[i];
   }
+
+  fpga_pci_poke(pci_bar_handle, 0x800, 0); // set buf to DDR C
+  bool buf_c = true;
+  int last_i = 0, last_j = 0;
   for (int i = 0; i < num_blocks; i++) {
     #pragma omp parallel for
     for (int j = 0; j < num_rows; j++) {
@@ -102,32 +113,42 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
         cur_row[k] = blocks[i][3 * j + k];
       }
     }
-    for (int j = i; j < num_blocks; j++) {
-      #pragma omp parallel for
-      for (int k = 0; k < num_rows; k++) {
-        uint64_t *cur_row = (uint64_t *)(input_data + 64 * k + 25);
-        for (int l = 0; l < 3; l++) {
-          cur_row[l] = blocks[j][3 * k + l];
+    // final iteration to collect last output
+    int bound = i == num_blocks - 1 ? num_blocks + 1 : num_blocks;
+    for (int j = i; j < bound; j++) {
+      if (j != num_blocks) {
+        #pragma omp parallel for
+        for (int k = 0; k < num_rows; k++) {
+          uint64_t *cur_row = (uint64_t *)(input_data + 64 * k + 25);
+          for (int l = 0; l < 3; l++) {
+            cur_row[l] = blocks[j][3 * k + l];
+          }
         }
       }
-      run(read_fd, write_fds, pci_bar_handle, input_buf, input_buf_size,
-        (uint8_t *)output_buf, output_buf_size);
-      int i_start_col = i * BLOCK_SIZE;
-      int j_start_col = j * BLOCK_SIZE;
-      int i_end_col = std::min(num_cols, i_start_col + BLOCK_SIZE);
-      int j_end_col = std::min(num_cols, j_start_col + BLOCK_SIZE);
-      for (int k = i_start_col; k < i_end_col; k++) {
-        for (int l = i == j ? k : j_start_col; l < j_end_col; l++) {
-          int remaining_triangle_base = num_cols - k;
-          // idx in output triangle
-          int target_idx = num_cols * (num_cols + 1) / 2 -
-            remaining_triangle_base * (remaining_triangle_base + 1) / 2 +
-            (l - k);
-          int source_idx = (k - i_start_col) * BLOCK_SIZE + (l - j_start_col);
-          memcpy(stats + 512 * target_idx, output_buf + 512 * source_idx,
-            512 * sizeof(uint32_t));
+      run(read_fd, write_fds, pci_bar_handle,
+        j == num_blocks ? NULL : input_buf, input_buf_size,
+        i == 0 && j == 0 ? NULL : (uint8_t *)output_buf, output_buf_size, buf_c);
+      if (!(i == 0 && j == 0)) {
+        int i_start_col = last_i * BLOCK_SIZE;
+        int j_start_col = last_j * BLOCK_SIZE;
+        int i_end_col = std::min(num_cols, i_start_col + BLOCK_SIZE);
+        int j_end_col = std::min(num_cols, j_start_col + BLOCK_SIZE);
+        for (int k = i_start_col; k < i_end_col; k++) {
+          for (int l = last_i == last_j ? k : j_start_col; l < j_end_col; l++) {
+            int remaining_triangle_base = num_cols - k;
+            // idx in output triangle
+            int target_idx = num_cols * (num_cols + 1) / 2 -
+              remaining_triangle_base * (remaining_triangle_base + 1) / 2 +
+              (l - k);
+            int source_idx = (k - i_start_col) * BLOCK_SIZE + (l - j_start_col);
+            memcpy(stats + 512 * target_idx, output_buf + 512 * source_idx,
+              512 * sizeof(uint32_t));
+          }
         }
       }
+      last_i = i;
+      last_j = j;
+      buf_c = !buf_c;
     }
   }
   munmap(input_buf, input_buf_size);
