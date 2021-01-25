@@ -49,7 +49,7 @@ void run(int read_fd, int write_fds[NUM_WRITE_THREADS], pci_bar_handle_t pci_bar
     fpga_pci_poke(pci_bar_handle, 0x600, 1);
   }
   if (output_buf != NULL) {
-    fpga_dma_burst_read(read_fd, output_buf, output_buf_size, 1000000000);
+    fpga_dma_burst_read(read_fd, output_buf, output_buf_size, 0);
   }
 }
 
@@ -99,7 +99,7 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
   }
   #pragma omp parallel for
   for (int i = 0; i < num_rows; i++) {
-    input_data[64 * i] = metric[i];
+    input_data[64 * i + 48] = metric[i];
   }
 
   fpga_pci_poke(pci_bar_handle, 0x800, 0); // set buf to DDR C
@@ -108,7 +108,7 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
   for (int i = 0; i < num_blocks; i++) {
     #pragma omp parallel for
     for (int j = 0; j < num_rows; j++) {
-      uint64_t *cur_row = (uint64_t *)(input_data + 64 * j + 1);
+      uint64_t *cur_row = (uint64_t *)(input_data + 64 * j);
       for (int k = 0; k < 3; k++) {
         cur_row[k] = blocks[i][3 * j + k];
       }
@@ -119,7 +119,7 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
       if (j != num_blocks) {
         #pragma omp parallel for
         for (int k = 0; k < num_rows; k++) {
-          uint64_t *cur_row = (uint64_t *)(input_data + 64 * k + 25);
+          uint64_t *cur_row = (uint64_t *)(input_data + 64 * k + 24);
           for (int l = 0; l < 3; l++) {
             cur_row[l] = blocks[j][3 * k + l];
           }
