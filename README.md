@@ -1,5 +1,5 @@
-## Pandas Interesting Subgroups
-This library tries to find interesting subgroups in your tabular Pandas data. Provided
+## Fast Data Explanation
+This library tries to explain trends in your tabular data. Provided
 a metric column of interest (e.g. a 0/1 class label, a numerical metric
 like latency, etc.), it prints any values of other columns and
 pairs of these values that are associated with unusual average values of the metric.
