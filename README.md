@@ -4,15 +4,6 @@ a metric column of interest (e.g. a 0/1 class label, a numerical metric
 like latency, etc.), it prints any values of other columns and
 pairs of these values that are associated with unusual average values of the metric.
 
-String, int, and double columns are supported. String
-columns with cardinality up to 100 will be considered. Int/double columns
-with cardinality up to 50 will be left as is, while such columns with greater
-cardinality will be discretized into 15 buckets of equal size, plus a separate
-bucket for nulls. The metric column must be int or double. If it has cardinality
-above 50, it will be discretized the same way as other columns. If not, it is
-expected to have values in the range [0, 256), and will be floored to int type if it
-is double.
-
 Any column values whose average metric values are are `z_thresh` standard deviations
 away from the global dataset metric average and appear in at least `count_thresh`
 rows will be reported in the 1D stats section of the output. For example, with
@@ -57,6 +48,15 @@ metric value of 7.0, which is at least 3.1 standard deviations from both the ave
 value for all rows with Price in first bucket and the average value for all rows with
 Department=Shoes. The same `z_thresh` and `count_thresh` from the 1D stats are used for
 the 2D stats.
+
+String, int, and double columns are supported. String
+columns with cardinality up to 100 will be considered. Int/double columns
+with cardinality up to 50 will be left as is, while such columns with greater
+cardinality will be discretized into 15 buckets of equal size, plus a separate
+bucket for nulls. The metric column must be int or double. If it has cardinality
+above 50, it will be discretized the same way as other columns. If not, it is
+expected to have values in the range [0, 256), and will be floored to int type if it
+is double.
 
 ## Installation
 Install pandas and pyarrow (python3). We recommend installing these
