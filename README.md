@@ -4,9 +4,10 @@ a metric column of interest (e.g. a 0/1 class label, a numerical metric
 like latency, etc.), it prints any values of other columns and
 pairs of these values that are associated with unusual average values of the metric.
 
-Any column values whose average metric values are are `z_thresh` standard deviations
-away from the global dataset metric average and appear in at least `count_thresh`
-rows will be reported in the 1D stats section of the output. For example, with
+Any column value that appears in at least `count_thresh` rows and
+whose rows have an average metric value `z_thresh` standard deviations
+away from the global dataset metric average will be reported in the
+1D stats section of the output. For example, with
 `z_thresh=3.0` and `count_thresh=20`, and for a continuous column called "Price"
 and a continuous metric column called "Total Sales", we might see the following output:
 ```
