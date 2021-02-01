@@ -1,61 +1,48 @@
-## Fast Data Explanation
-This library tries to explain trends in your tabular data. Provided
-a metric column of interest (e.g. a 0/1 class label, a numerical metric
-like latency, etc.), it prints any values of other columns and
-pairs of these values that are associated with unusual average values of the metric.
+## Feature Analyzer
+This tool provides an interpretable analysis of the effect of
+all features and pairs of features on your output variable. Provided
+an output variable of interest (e.g. a 0/1 class label, a numerical metric
+like latency, etc.), it prints any feature values and
+pairs of feature values that are associated with unusual average values of the output. The results can be used for feature selection or to construct new features based on particular ranges or combinations of the original features.
 
-Any column value that appears in at least `count_thresh` rows and
-whose rows have an average metric value `z_thresh` standard deviations
-away from the global dataset metric average will be reported in the
-1D stats section of the output. For example, with
-`z_thresh=3.0` and `count_thresh=20`, and for a continuous column called "Price"
-and a continuous metric column called "Total Sales", we might see the following output:
+Any feature value that appears in at least `count_thresh` datapoints and
+whose datapoints have an average output value `z_thresh` standard deviations
+away from the global dataset average will be reported in the
+1D stats section of the printed result. For example, with
+`z_thresh=3.0` and `count_thresh=20`, and for a continuous feature called "Price"
+and a continuous output called "Total Sales", we might see the following result:
 ```
-Total Sales (500.3-70045.1) global mean: 4.1, global stddev: 2.2
+Total Sales global mean: 4.1, global stddev: 2.2
 
 ***1D stats***
 
-...
-
-Price (5.0-100.0):
+Price:
   0: 5.2 (z: 4.8, #: 101)
   1: 3.2 (z: -3.6, #: 75)
 ```
-This indicates that the Total Sales column has a range of [500.3, 70045.1] that
-was used to discretize it into 15 equally sized buckets. (Whether a column
-is categorical or continuous and its range if it is continuous is now
-printed in the Columns section above the 1D stats section.) The average Total Sales
-bucket index across all the rows is 4.1 with standard deviation 2.2. Further,
-the Price column has a range of [5.0, 100.0] that was used
-to discretize it into 15 equally sized buckets. The 101 rows with a Price value in the
-first bucket have an average metric value of 5.2, which is 4.8 standard deviations
-above the mean of 4.1. There is a similar story for the second bucket.
+Continuous features and outputs are discretized into buckets, and the average Total Sales
+bucket across the entire dataset is 4.1 with standard deviation 2.2. The 101 datapoints with Price bucket 0 have an average Total Sales of 5.2, which is 4.8 standard deviations
+above the mean of 4.1. Likewise for the 75 datapoints with Price bucket 1.
 
-For categorical variables, their actual values will be used instead of bucket
-indices.
-
-The 2D stats section shows any pairs of column values that are interesting. If we had a
-second categorical column called "Department", we might see the following output:
+The 2D stats section shows any pairs of feature values that are interesting. If we had a
+second categorical feature called "Department", we might see the following output:
 ```
 ***2D stats***
-
-...
 
 Price/Department:
   0/Shoes: 7.0 (z: 3.1, #: 20)
 ```
-This shows that the 20 rows with Price in the first bucket and Department=Shoes have an average
-metric value of 7.0, which is at least 3.1 standard deviations from both the average
-value for all rows with Price in first bucket and the average value for all rows with
+This shows that the 20 datapoints with Price bucket 0 and Department=Shoes have an average
+output value of 7.0, which is at least 3.1 standard deviations from both the average
+for all datapoints with Price bucket 0 and the average for all datapoints with
 Department=Shoes. The same `z_thresh` and `count_thresh` from the 1D stats are used for
 the 2D stats.
 
-String, int, and double columns are supported. String
-columns with cardinality up to 100 will be considered. Int/double columns
-with cardinality up to 50 will be left as is, while such columns with greater
-cardinality will be discretized into 15 buckets of equal size, plus a separate
-bucket for nulls. The metric column must be int or double. If it has cardinality
-above 50, it will be discretized the same way as other columns. If not, it is
+String, int, and double features are supported. String
+features with cardinality up to 100 will be considered categorical, and others will be discarded. Int/double features 
+with cardinality up to 50 will be considered categorical, while others will be discretized into 15 buckets of equal size, plus a separate
+bucket for nulls. The output variable must be int or double. If it has cardinality
+above 50, it will be discretized the same way as the features. If not, it is
 expected to have values in the range [0, 256), and will be floored to int type if it
 is double.
 
@@ -74,8 +61,8 @@ missing `Python.h`, you may need to install the package `python3-dev` or
 the `nvcc` compiler, which should be available in any GPU-specific
 AMI on EC2, such as the deep learning AMIs. Details on the FPGA build are below.
 
-Modify rookies.py to load your dataset. Pass in the dataset, desired metric
-column, `z_thresh`, `count_thresh`, and whether results with a null column value
+Modify rookies.py to load your dataset. Pass in the dataset, desired output 
+column, `z_thresh`, `count_thresh`, and whether results with a null feature value
 should be shown. Run with `python3 rookies.py` to see printed results.
 rand.py is an example that uses randomly generated data.
 
@@ -99,6 +86,6 @@ https://github.com/jjthomas/DataCubeFPGA.
 
 ## Example Data
 We include an example dataset Rookies.csv, which includes rookie-year stats for all NBA
-players through 2017. We look at which column values and pairs of values are interesting
-with respect to the "IFAS" metric column, which is a binary variable indicating whether
+players through 2017. We look at which feature values and pairs of values are interesting
+with respect to the "IFAS" output, which is a binary variable indicating whether
 the player ever became an all-star in their career.
