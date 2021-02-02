@@ -1,4 +1,4 @@
-## Feature Summary
+## Feature Importance Summary
 This tool provides an interpretable summary of the effect of
 all features and pairs of features on your output variable. Provided
 an output variable of interest (e.g. a 0/1 class label, a numerical metric
