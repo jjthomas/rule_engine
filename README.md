@@ -36,7 +36,7 @@ Price/Department:
   0/Shoes: 7.0 (z: 3.1, #: 20)
 ```
 This shows that the 20 datapoints with Price bucket 0 and Department=Shoes have an average
-output value of 7.0, which is at least 3.1 standard deviations from both the average
+Total Sales value of 7.0, which is at least 3.1 standard deviations from both the average
 for all datapoints with Price bucket 0 and the average for all datapoints with
 Department=Shoes. The same `z_thresh` and `count_thresh` from the 1D stats are used for
 the 2D stats.
