@@ -12,8 +12,7 @@ Any feature value that appears in at least `count_thresh` datapoints and
 whose datapoints have an average output value `z_thresh` standard deviations
 away from the global dataset average will be reported in the
 1D stats section of the printed summary. For example, with
-`z_thresh=3.0` and `count_thresh=20`, and for a continuous feature called "Price"
-and a continuous output called "Total Sales", we might see the following result:
+`z_thresh=3.0` and `count_thresh=20`, and an output called "Total Sales", we might see the following as part of our summary if we have a feature called "Price":
 ```
 Total Sales global mean: 4.1, global stddev: 2.2
 
@@ -26,10 +25,10 @@ Price:
 Continuous features and outputs are discretized into buckets, and the average Total Sales
 bucket across the entire dataset is 4.1 with standard deviation 2.2. The 101 datapoints with
 Price bucket 0 have an average Total Sales of 5.2, which is 4.8 standard deviations
-above the mean of 4.1. Likewise for the 75 datapoints with Price bucket 1.
+above the mean of 4.1 and therefore significant at `z_thresh=3.0`. Likewise for the 75 datapoints with Price bucket 1.
 
 The 2D stats section shows any pairs of feature values that are interesting. If we had a
-second categorical feature called "Department", we might see the following output:
+second feature called "Department", we might see the following as part of our summary:
 ```
 ***2D stats***
 
