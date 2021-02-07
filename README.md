@@ -12,7 +12,9 @@ Any feature value that appears in at least `count_thresh` datapoints and
 whose datapoints have an average output value `z_thresh` standard deviations
 away from the global dataset average will be reported in the
 1D stats section of the printed summary. For example, with
-`z_thresh=3.0` and `count_thresh=20`, and an output called "Total Sales", we might see the following as part of our summary if we have a feature called "Price":
+`z_thresh=3.0` and `count_thresh=20`, a dataset of items in a retail store,
+and an output called "Total Sales", we might see the following as part of our
+summary if we have a feature called "Price":
 ```
 Total Sales global mean: 4.1, global stddev: 2.2
 
