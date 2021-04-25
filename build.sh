@@ -14,22 +14,17 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
   CC=/usr/local/opt/llvm/bin/clang++
   OMP_LIB="-L/usr/local/opt/llvm/lib"
 fi
-if [[ "$SIM" == "1" || "$GPU" == "1" || "$FPGA" == 1 ]]; then
-  DEFINES="-DACC"
-fi
-if [[ "$SIM" == "1" ]]; then
-  $CC $CFLAGS -std=c++11 -fopenmp -fPIC -c sim.cpp -o sim.o
-  EXTRA_FILES="sim.o"
-fi
 if [[ "$GPU" == "1" ]]; then
   nvcc $CFLAGS -Xcompiler -fopenmp,-fPIC -c gpu.cu -o gpu.o
   EXTRA_FILES="gpu.o"
   EXTRA_LINK="-L/usr/local/cuda/lib64 -lcudart -lcuda"
-fi
-if [[ "$FPGA" == "1" ]]; then
+elif [[ "$FPGA" == "1" ]]; then
   $CC $CFLAGS -std=c++11 -fopenmp -I$F1_SDK/userspace/include -fPIC -c fpga.cpp -o fpga.o
   EXTRA_FILES="fpga.o"
   EXTRA_LINK="-lfpga_mgmt"
+else
+  $CC $CFLAGS -std=c++11 -fopenmp -fPIC -c sim.cpp -o sim.o
+  EXTRA_FILES="sim.o"
 fi
-$CC $CFLAGS -std=c++11 -fopenmp $DEFINES -I$PA_INC -I$PY_INC -fPIC cube.cpp $EXTRA_FILES -shared -o libcube $PA_LIB $PY_LIB $OMP_LIB -larrow -larrow_python $PY_LIB_NAME $EXTRA_LINK
+$CC $CFLAGS -std=c++11 -fopenmp -I$PA_INC -I$PY_INC -fPIC cube.cpp $EXTRA_FILES -shared -o libcube $PA_LIB $PY_LIB $OMP_LIB -larrow -larrow_python $PY_LIB_NAME $EXTRA_LINK
 

@@ -134,12 +134,12 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
         int i_end_col = std::min(num_cols, i_start_col + BLOCK_SIZE);
         int j_end_col = std::min(num_cols, j_start_col + BLOCK_SIZE);
         for (int k = i_start_col; k < i_end_col; k++) {
-          for (int l = last_i == last_j ? k : j_start_col; l < j_end_col; l++) {
+          for (int l = last_i == last_j ? k + 1 : j_start_col; l < j_end_col; l++) {
             int remaining_triangle_base = num_cols - k;
             // idx in output triangle
-            int target_idx = num_cols * (num_cols + 1) / 2 -
-              remaining_triangle_base * (remaining_triangle_base + 1) / 2 +
-              (l - k);
+            int target_idx = num_cols * (num_cols - 1) / 2 -
+              remaining_triangle_base * (remaining_triangle_base - 1) / 2 +
+              (l - k - 1);
             int source_idx = (k - i_start_col) * BLOCK_SIZE + (l - j_start_col);
             memcpy(stats + 512 * target_idx, output_buf + 512 * source_idx,
               512 * sizeof(uint32_t));

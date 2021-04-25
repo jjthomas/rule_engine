@@ -7,11 +7,11 @@
 extern "C" void compute2d_acc(uint8_t **, int, int, uint8_t *, uint32_t *);
 
 void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, uint32_t *stats) {
-  int num_pairs = num_cols * (num_cols + 1) / 2;
+  int num_pairs = num_cols * (num_cols - 1) / 2;
   memset(stats, 0, 512 * sizeof(uint32_t) * num_pairs);
   std::vector<std::pair<int, int>> idx_mapping;
   for (int i = 0; i < num_cols; i++) {
-    for (int j = i; j < num_cols; j++) {
+    for (int j = i + 1; j < num_cols; j++) {
       idx_mapping.emplace_back(i, j);
     }
   }

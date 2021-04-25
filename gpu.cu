@@ -65,12 +65,12 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
   assert(cudaMalloc((void **) &metric_dev, num_rows) == cudaSuccess);
   cudaMemcpy(metric_dev, metric, num_rows, cudaMemcpyHostToDevice);
 
-  int num_pairs = num_cols * (num_cols + 1) / 2;
+  int num_pairs = num_cols * (num_cols - 1) / 2;
   int block_idxs_size = sizeof(uint32_t) * 2 * num_pairs;
   uint32_t *block_idxs = (uint32_t *)malloc(block_idxs_size);
   int pair_cnt = 0;
   for (int i = 0; i < num_cols; i++) {
-    for (int j = i; j < num_cols; j++) {
+    for (int j = i + 1; j < num_cols; j++) {
       block_idxs[2 * pair_cnt] = i;
       block_idxs[2 * pair_cnt + 1] = j;
       pair_cnt++;
