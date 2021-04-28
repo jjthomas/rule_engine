@@ -644,3 +644,43 @@ extern "C" PyObject *prune_rules(void *sums, PyObject *table, PyObject *rules,
   assert(chosen_b.Finish(&chosen_final).ok());
   return arrow::py::wrap_array(chosen_final);
 }
+
+extern "C" PyObject *get_col_map(void *sums) {
+  arrow::py::PyAcquireGIL lock;
+  Sums *s = static_cast<Sums *>(sums);
+  PyObject *map = PyList_New(s->col_names.size());
+  for (int i = 0; i < s->col_names.size(); i++) {
+    PyObject *t = PyTuple_New(3);
+    PyTuple_SetItem(t, 0, Py_BuildValue("s", s->col_names[i].c_str()));
+    if (s->min_max.find(i) != s->min_max.end()) {
+      PyTuple_SetItem(t, 1, Py_BuildValue("s", "c"));
+      PyTuple_SetItem(t, 2, Py_BuildValue("(dd)", s->min_max[i].first,
+        s->min_max[i].second));
+    } else if (s->int_mappings.find(i) != s->int_mappings.end()) {
+      PyTuple_SetItem(t, 1, Py_BuildValue("s", "i"));
+      PyObject *vals = PyList_New(s->int_mappings[i].size());
+      for (int j = 0; j < s->int_mappings[i].size(); j++) {
+        PyList_SetItem(vals, j, Py_BuildValue("L", s->int_mappings[i][j]));
+      }
+      PyTuple_SetItem(t, 2, vals);
+    } else if (s->double_mappings.find(i) != s->double_mappings.end()) {
+      PyTuple_SetItem(t, 1, Py_BuildValue("s", "d"));
+      PyObject *vals = PyList_New(s->double_mappings[i].size());
+      for (int j = 0; j < s->double_mappings[i].size(); j++) {
+        PyList_SetItem(vals, j, Py_BuildValue("d", s->double_mappings[i][j]));
+      }
+      PyTuple_SetItem(t, 2, vals);
+    } else { // string
+      PyTuple_SetItem(t, 1, Py_BuildValue("s", "s"));
+      PyObject *vals = PyList_New(s->string_mappings[i].size());
+      for (int j = 0; j < s->string_mappings[i].size(); j++) {
+        PyList_SetItem(vals, j, Py_BuildValue("s",
+          s->string_mappings[i][j].c_str()));
+      }
+      PyTuple_SetItem(t, 2, vals);
+    }
+    PyList_SetItem(map, i, t);
+  }
+
+  return map;
+}

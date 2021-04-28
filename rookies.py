@@ -6,4 +6,7 @@ df = df.drop(columns = ['AS'])
 s = cube.compute_sums(df, "IFAS")
 r = s.get_rules(0.7, 10)
 print(s.evaluate_summary(df, r))
+r = s.prune_rules(df, r, 0, 1)
+print(s.evaluate_summary(df, r))
+s.display_rules(r)
 
