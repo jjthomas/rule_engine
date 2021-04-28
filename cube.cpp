@@ -6,19 +6,21 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
-#include <set>
 #include <map>
+#include <unordered_set>
+#include <unordered_map>
 #include <inttypes.h>
 #include <sys/time.h>
 
 extern "C" void compute2d_acc(uint8_t **, int, int, uint8_t *, uint32_t *);
 
+// these must be <= 255
 #define STRING_CARD_LIMIT 100
 #define NUM_CARD_LIMIT 50
 #define DISC_COUNT 15
 
 struct Sums {
-  std::vector<int> orig_col_idx;
+  std::vector<std::string> col_names;
   std::map<int, std::pair<double, double>> min_max;
   std::map<int, std::vector<double>> double_mappings;
   std::map<int, std::vector<int64_t>> int_mappings;
@@ -35,44 +37,44 @@ inline bool not_null(const uint8_t *null_map, int64_t pos) {
 }
 
 template <typename T>
-bool categorical(const T *data, int64_t len, const uint8_t *null_map, int limit) {
-  std::set<T> s;
+bool categorical(const T *data, int64_t len, const uint8_t *null_map, int limit,
+  std::vector<T>& rev_mapping) {
+  std::unordered_set<T> s;
   for (int64_t i = 0; i < len; i++) {
     if (not_null(null_map, i)) {
       s.insert(data[i]);
+      if (s.size() > limit) {
+        return false;
+      }
     }
-    if (s.size() > limit) {
-      return false;
-    }
+  }
+  for (T e : s) {
+    rev_mapping.push_back(e);
   }
   return true;
 }
 
 template <typename T>
 void enumerate_cat(const T *data, int64_t len, const uint8_t *null_map,
-  std::vector<uint8_t>& result, std::vector<T> &rev_mapping) {
-  // save 0 id for null
-  uint8_t cur_id = 1;
-  std::map<T, uint8_t> mapping;
+  std::vector<T>& rev_mapping, std::vector<uint8_t>& result) {
+  std::unordered_map<T, uint8_t> mapping;
+  for (int i = 0; i < rev_mapping.size(); i++) {
+    // save 0 for null
+    mapping[rev_mapping[i]] = i + 1;
+  }
   for (int64_t i = 0; i < len; i++) {
     if (not_null(null_map, i)) {
-      if (mapping.find(data[i]) == mapping.end()) {
-        mapping[data[i]] = cur_id++;
-      }
-      result[i] = mapping[data[i]];
+      auto e = mapping.find(data[i]);
+      result[i] = e == mapping.end() ? 0 : e->second;
     } else {
       result[i] = 0;
     }
   }
-  rev_mapping.resize(mapping.size());
-  for (std::pair<T, uint8_t> e : mapping) {
-    rev_mapping[e.second - 1] = e.first;
-  }
 }
 
 template <typename T>
-std::pair<double, double> discretize_cont(const T *data, int64_t len,
-  const uint8_t *null_map, std::vector<uint8_t>& result) {
+std::pair<double, double> get_range_cont(const T *data, int64_t len,
+  const uint8_t *null_map) {
   int64_t i = 0;
   while (!not_null(null_map, i)) {
     i++;
@@ -89,17 +91,23 @@ std::pair<double, double> discretize_cont(const T *data, int64_t len,
       }
     }
   }
+  return std::make_pair((double)min, (double)max);
+}
 
-  double step = ((double)(max - min)) / DISC_COUNT;
-  for (i = 0; i < len; i++) {
+template <typename T>
+void discretize_cont(const T *data, int64_t len, const uint8_t *null_map,
+  std::pair<double, double> range, std::vector<uint8_t>& result) {
+  double min, max;
+  std::tie(min, max) = range;
+  double step = (max - min) / DISC_COUNT;
+  for (int64_t i = 0; i < len; i++) {
     if (not_null(null_map, i)) {
-      result[i] = 1 + std::min((uint8_t)(DISC_COUNT - 1), (uint8_t)((data[i] - min) / step));
+      double clamped = std::max(min, std::min<double>(data[i], max));
+      result[i] = 1 + std::min<uint8_t>(DISC_COUNT - 1, (clamped - min) / step);
     } else {
       result[i] = 0;
     }
   }
-
-  return std::make_pair((double)min, (double)max);
 }
 
 std::pair<std::vector<uint64_t>, std::vector<uint64_t>>
@@ -185,24 +193,26 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
       case arrow::Type::type::DOUBLE: {
         auto arr = std::static_pointer_cast<arrow::DoubleArray>(table->column(i)->chunk(0));
         bool is_cat = categorical(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
-          NUM_CARD_LIMIT);
+          NUM_CARD_LIMIT, double_mappings_init[i]);
         cols_init[i] = std::vector<uint8_t>(num_rows);
         std::vector<uint8_t>& col = cols_init[i];
         if (is_cat) {
           col_status[i] = CAT;
           enumerate_cat(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
-            col, double_mappings_init[i]);
+            double_mappings_init[i], col);
         } else {
           col_status[i] = CONT;
-          min_max_init[i] = discretize_cont(arr->raw_values(), arr->length(),
-            arr->null_bitmap_data(), col);
+          min_max_init[i] = get_range_cont(arr->raw_values(), arr->length(),
+            arr->null_bitmap_data());
+          discretize_cont(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
+            min_max_init[i], col);
         }
         break;
       }
       case arrow::Type::type::INT64: {
         auto arr = std::static_pointer_cast<arrow::Int64Array>(table->column(i)->chunk(0));
         bool is_cat = categorical(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
-          NUM_CARD_LIMIT);
+          NUM_CARD_LIMIT, int_mappings_init[i]);
         cols_init[i] = std::vector<uint8_t>(num_rows);
         std::vector<uint8_t>& col = cols_init[i];
         if (is_cat) {
@@ -220,16 +230,18 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
                 col_status[i] = METRIC_ERROR;
                 break;
               }
-              col[j] = (uint8_t)arr->Value(j);
+              col[j] = arr->Value(j);
             }
           } else {
             enumerate_cat(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
-              col, int_mappings_init[i]);
+              int_mappings_init[i], col);
           }
         } else {
           col_status[i] = CONT;
-          min_max_init[i] = discretize_cont(arr->raw_values(), arr->length(),
-            arr->null_bitmap_data(), col);
+          min_max_init[i] = get_range_cont(arr->raw_values(), arr->length(),
+            arr->null_bitmap_data());
+          discretize_cont(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
+            min_max_init[i], col);
         }
         break;
       }
@@ -240,12 +252,12 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
           str_arr[j] = arr->GetString(j);
         }
         bool is_cat = categorical(str_arr.data(), arr->length(), arr->null_bitmap_data(),
-          STRING_CARD_LIMIT);
+          STRING_CARD_LIMIT, string_mappings_init[i]);
         if (is_cat) {
           col_status[i] = CAT;
           cols_init[i] = std::vector<uint8_t>(num_rows);
           enumerate_cat(str_arr.data(), arr->length(), arr->null_bitmap_data(),
-            cols_init[i], string_mappings_init[i]);
+            string_mappings_init[i], cols_init[i]);
         } else {
           col_status[i] = STRING_HIGH_CARD;
         }
@@ -264,7 +276,7 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
 
   std::vector<std::vector<uint8_t>> cols;
   std::vector<int> sizes;
-  std::vector<int> orig_col_idx;
+  std::vector<std::string> col_names;
   std::map<int, std::pair<double, double>> min_max;
   std::map<int, std::vector<double>> double_mappings;
   std::map<int, std::vector<int64_t>> int_mappings;
@@ -300,7 +312,7 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
           size += string_mappings[cur_col].size();
         }
       }
-      orig_col_idx.push_back(i);
+      col_names.push_back(f->name());
       cols.push_back(std::move(cols_init[i]));
       sizes.push_back(size);
     }
@@ -357,7 +369,7 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
   printf("2D time: %ld.%06ld\n", (long)diff.tv_sec, (long)diff.tv_usec);
 
   Sums *sums = new Sums;
-  sums->orig_col_idx = std::move(orig_col_idx);
+  sums->col_names = std::move(col_names);
   sums->min_max = std::move(min_max);
   sums->double_mappings = std::move(double_mappings);
   sums->int_mappings = std::move(int_mappings);
@@ -369,6 +381,73 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
   sums->pair_counts = std::move(acc_counts);
 
   return sums;
+}
+
+std::vector<std::vector<uint8_t>> encode_table(Sums *s,
+  std::shared_ptr<arrow::Table> table) {
+  std::vector<std::vector<uint8_t>> cols(s->col_names.size());
+  std::vector<int> input_idx(s->col_names.size());
+  std::unordered_map<std::string, int> name_to_idx;
+  auto column_names = table->ColumnNames();
+  for (int i = 0; i < column_names.size(); i++) {
+    name_to_idx[column_names[i]] = i;
+  }
+  for (int i = 0; i < s->col_names.size(); i++) {
+    auto e = name_to_idx.find(s->col_names[i]);
+    assert(e != name_to_idx.end());
+    input_idx[i] = e->second;
+  }
+  int64_t num_rows = table->num_rows();
+  #pragma omp parallel for schedule(dynamic)
+  for (int i = 0; i < input_idx.size(); i++) {
+    int idx = input_idx[i];
+    assert(table->column(idx)->num_chunks() == 1);
+    auto f = table->schema()->field(idx);
+    cols[i] = std::vector<uint8_t>(num_rows);
+    switch (f->type()->id()) {
+      case arrow::Type::type::DOUBLE: {
+        auto arr =
+          std::static_pointer_cast<arrow::DoubleArray>(table->column(idx)->chunk(0));
+        if (s->min_max.find(i) != s->min_max.end()) {
+          discretize_cont(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
+            s->min_max[i], cols[i]);
+        } else {
+          assert(s->double_mappings.find(i) != s->double_mappings.end());
+          enumerate_cat(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
+            s->double_mappings[i], cols[i]);
+        }
+        break;
+      }
+      case arrow::Type::type::INT64: {
+        auto arr =
+          std::static_pointer_cast<arrow::Int64Array>(table->column(idx)->chunk(0));
+        if (s->min_max.find(i) != s->min_max.end()) {
+          discretize_cont(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
+            s->min_max[i], cols[i]);
+        } else {
+          assert(s->int_mappings.find(i) != s->int_mappings.end());
+          enumerate_cat(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
+            s->int_mappings[i], cols[i]);
+        }
+        break;
+      }
+      case arrow::Type::type::STRING: {
+        auto arr =
+          std::static_pointer_cast<arrow::StringArray>(table->column(idx)->chunk(0));
+        assert(s->string_mappings.find(i) != s->string_mappings.end());
+        std::vector<std::string> str_arr(arr->length());
+        for (int64_t j = 0; j < arr->length(); j++) {
+          str_arr[j] = arr->GetString(j);
+        }
+        enumerate_cat(str_arr.data(), arr->length(), arr->null_bitmap_data(),
+          s->string_mappings[i], cols[i]);
+        break;
+      }
+      default:
+        assert(false);
+    }
+  }
+  return cols;
 }
 
 extern "C" void free_sums(void *sums) {
@@ -390,7 +469,7 @@ extern "C" PyObject *get_rules(void *sums, double pos_thresh, int min_count) {
     for (int j = 1; j < sum.size(); j++) { // skip null value
       if (count[j] >= min_count && (double)sum[j] / count[j] >= pos_thresh) {
         assert(col1_b.Append(i).ok());
-        assert(col1val_b.Append(j - 1).ok());
+        assert(col1val_b.Append(j).ok());
         assert(col2_b.Append(-1).ok());
         assert(col2val_b.Append(-1).ok());
         assert(cnt_b.Append(count[j]).ok());
@@ -422,9 +501,9 @@ extern "C" PyObject *get_rules(void *sums, double pos_thresh, int min_count) {
               (double)s->col_sums[s_idx][s_val] / s->col_counts[s_idx][s_val] < pos_thresh) {
             // both parents below thresh
             assert(col1_b.Append(f_idx).ok());
-            assert(col1val_b.Append(f_val - 1).ok());
+            assert(col1val_b.Append(f_val).ok());
             assert(col2_b.Append(s_idx).ok());
-            assert(col2val_b.Append(s_val - 1).ok());
+            assert(col2val_b.Append(s_val).ok());
             assert(cnt_b.Append(s->pair_counts[k]).ok());
             assert(pos_frac_b.Append((double)s->pair_sums[k] / s->pair_counts[k]).ok());
           }
@@ -451,4 +530,117 @@ extern "C" PyObject *get_rules(void *sums, double pos_thresh, int min_count) {
   auto schema = std::make_shared<arrow::Schema>(schema_vector);
   auto table = arrow::Table::Make(schema, {col1, col1val, col2, col2val, cnt, pos_frac});
   return arrow::py::wrap_table(table);
+}
+
+void validate_rules(Sums *s, const int64_t *col1, const int64_t *col1val,
+  const int64_t *col2, const int64_t *col2val, int64_t len) {
+  for (int64_t i = 0; i < len; i++) {
+    assert(col1[i] >= 0 && col1[i] < s->col_names.size());
+    assert(col1val[i] >= 1 && col1val[i] < s->col_sums[col1[i]].size());
+    assert(col2[i] == -1 ||
+      (col2[i] >= 0 && col2[i] < s->col_names.size()));
+    assert(col2[i] == -1 ||
+      (col2val[i] >= 1 && col2val[i] < s->col_sums[col2[i]].size()));
+  }
+}
+
+extern "C" PyObject *evaluate(void *sums, PyObject *table, PyObject *rules) {
+  arrow::py::PyAcquireGIL lock;
+  Sums *s = static_cast<Sums *>(sums);
+  auto t = arrow::py::unwrap_table(table).ValueOrDie();
+  auto r = arrow::py::unwrap_table(rules).ValueOrDie();
+  std::vector<std::vector<uint8_t>> cols = encode_table(s, t);
+  assert(r->schema()->field(0)->type()->id() == arrow::Type::type::INT64);
+  auto col1 =
+    std::static_pointer_cast<arrow::Int64Array>(r->column(0)->chunk(0))->raw_values();
+  assert(r->schema()->field(1)->type()->id() == arrow::Type::type::INT64);
+  auto col1val =
+    std::static_pointer_cast<arrow::Int64Array>(r->column(1)->chunk(0))->raw_values();
+  assert(r->schema()->field(2)->type()->id() == arrow::Type::type::INT64);
+  auto col2 =
+    std::static_pointer_cast<arrow::Int64Array>(r->column(2)->chunk(0))->raw_values();
+  assert(r->schema()->field(3)->type()->id() == arrow::Type::type::INT64);
+  auto col2val =
+    std::static_pointer_cast<arrow::Int64Array>(r->column(3)->chunk(0))->raw_values();
+  validate_rules(s, col1, col1val, col2, col2val, r->num_rows());
+
+  std::vector<int> pred(cols[0].size());
+  #pragma omp parallel for
+  for (int64_t i = 0; i < r->num_rows(); i++) {
+    for (int64_t j = 0; j < cols[0].size(); j++) {
+      if (cols[col1[i]][j] == col1val[i] &&
+          (col2[i] == -1 || cols[col2[i]][j] == col2val[i])) {
+        pred[j] = 1;
+      }
+    }
+  }
+
+  arrow::MemoryPool *pool = arrow::default_memory_pool();
+  arrow::Int64Builder pred_b(pool);
+  for (int64_t i = 0; i < pred.size(); i++) {
+    assert(pred_b.Append(pred[i]).ok());
+  }
+  std::shared_ptr<arrow::Array> pred_final;
+  assert(pred_b.Finish(&pred_final).ok());
+  return arrow::py::wrap_array(pred_final);
+}
+
+// rules should be sorted descending by count
+extern "C" PyObject *prune_rules(void *sums, PyObject *table, PyObject *rules,
+  int metric_idx, double pos_thresh, int min_pos_count) {
+  arrow::py::PyAcquireGIL lock;
+  Sums *s = static_cast<Sums *>(sums);
+  auto t = arrow::py::unwrap_table(table).ValueOrDie();
+  auto r = arrow::py::unwrap_table(rules).ValueOrDie();
+  std::vector<std::vector<uint8_t>> cols = encode_table(s, t);
+  assert(r->schema()->field(0)->type()->id() == arrow::Type::type::INT64);
+  auto col1 =
+    std::static_pointer_cast<arrow::Int64Array>(r->column(0)->chunk(0))->raw_values();
+  assert(r->schema()->field(1)->type()->id() == arrow::Type::type::INT64);
+  auto col1val =
+    std::static_pointer_cast<arrow::Int64Array>(r->column(1)->chunk(0))->raw_values();
+  assert(r->schema()->field(2)->type()->id() == arrow::Type::type::INT64);
+  auto col2 =
+    std::static_pointer_cast<arrow::Int64Array>(r->column(2)->chunk(0))->raw_values();
+  assert(r->schema()->field(3)->type()->id() == arrow::Type::type::INT64);
+  auto col2val =
+    std::static_pointer_cast<arrow::Int64Array>(r->column(3)->chunk(0))->raw_values();
+  validate_rules(s, col1, col1val, col2, col2val, r->num_rows());
+
+  assert(t->column(metric_idx)->num_chunks() == 1);
+  assert(t->schema()->field(metric_idx)->type()->id() == arrow::Type::type::INT64);
+  auto metric = std::static_pointer_cast<arrow::Int64Array>(
+    t->column(metric_idx)->chunk(0))->raw_values();
+  std::vector<int> classified(cols[0].size());
+  std::vector<int64_t> chosen_rules;
+  for (int64_t i = 0; i < r->num_rows(); i++) {
+    int64_t pos_new = 0, neg_new = 0;
+    #pragma omp parallel for
+    for (int64_t j = 0; j < cols[0].size(); j++) {
+      if (cols[col1[i]][j] == col1val[i] &&
+          (col2[i] == -1 || cols[col2[i]][j] == col2val[i]) && classified[j] == 0) {
+        if (metric[j] == 1) {
+          #pragma omp atomic
+          pos_new++;
+        } else {
+          #pragma omp atomic
+          neg_new++;
+        }
+        classified[j] = 1;
+      }
+    }
+    if ((double)pos_new / (pos_new + neg_new) >= pos_thresh &&
+        pos_new >= min_pos_count) {
+      chosen_rules.push_back(i);
+    }
+  }
+
+  arrow::MemoryPool *pool = arrow::default_memory_pool();
+  arrow::Int64Builder chosen_b(pool);
+  for (int64_t i = 0; i < chosen_rules.size(); i++) {
+    assert(chosen_b.Append(chosen_rules[i]).ok());
+  }
+  std::shared_ptr<arrow::Array> chosen_final;
+  assert(chosen_b.Finish(&chosen_final).ok());
+  return arrow::py::wrap_array(chosen_final);
 }
