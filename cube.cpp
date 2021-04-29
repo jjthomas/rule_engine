@@ -587,7 +587,7 @@ extern "C" PyObject *evaluate(void *sums, PyObject *table, PyObject *rules) {
 
 // rules should be sorted descending by count
 extern "C" PyObject *prune_rules(void *sums, PyObject *table, PyObject *rules,
-  int metric_idx, double pos_thresh, int min_pos_count) {
+  int metric_idx, double pos_thresh, int min_count) {
   arrow::py::PyAcquireGIL lock;
   Sums *s = static_cast<Sums *>(sums);
   auto t = arrow::py::unwrap_table(table).ValueOrDie();
@@ -630,7 +630,7 @@ extern "C" PyObject *prune_rules(void *sums, PyObject *table, PyObject *rules,
       }
     }
     if ((double)pos_new / (pos_new + neg_new) >= pos_thresh &&
-        pos_new >= min_pos_count) {
+        pos_new + neg_new >= min_count) {
       chosen_rules.push_back(i);
     }
   }
