@@ -6,7 +6,9 @@ import sys
 
 df = pd.DataFrame()
 np.random.seed(0)
-for i in range(int(sys.argv[1])):
+df["c0"] = np.random.randint(0, 2, 1 << 22)
+for i in range(1, int(sys.argv[1])):
   df["c%d" % i] = np.random.randint(0, int(sys.argv[2]), 1 << 22)
-cube.compute_stats(df, "c0", 2.0, 20)
+s = cube.compute_sums(df, "c0")
+print(s.get_rules(0.50, 10))
 
