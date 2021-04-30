@@ -323,7 +323,7 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
       }
       printf("\n");
     } else if (col_status[i] == CONT) {
-      printf("  continuous (%.2f-%.2f)\n", min_max_init[i].first, min_max_init[i].second);
+      printf("  continuous (%.2f to %.2f)\n", min_max_init[i].first, min_max_init[i].second);
     }
   }
   gettimeofday(&end, 0);

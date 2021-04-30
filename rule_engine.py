@@ -42,7 +42,7 @@ class Sums:
       if self.map[col][1] == "c":
         l, h = self.map[col][2]
         step = (h - l) / 15
-        res += "[{0:.2f}, {1:.2f}]".format(l + colval * step,
+        res += "{0:.2f} to {1:.2f}".format(l + colval * step,
           l + (colval + 1) * step)
       elif self.map[col][1] == "d":
         res += "{0:.2f}".format(self.map[col][2][colval])
