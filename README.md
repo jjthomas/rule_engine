@@ -1,56 +1,22 @@
-## Feature Importance Summary
-This tool provides an interpretable summary of the effect of
-all features and pairs of features on your output variable. Provided
-an output variable of interest (e.g. a 0/1 class label, a numerical metric
-like latency, etc.), it prints any feature values and
-pairs of feature values that are associated with unusual average values of the output.
-The summary can be used for feature selection or to construct new features based on
-particular ranges or combinations of the original features. The summaries of different batches
-of data can also be compared to determine changes in feature importance.
-
-Any feature value that appears in at least `count_thresh` datapoints and
-whose datapoints have an average output value `z_thresh` standard deviations
-away from the global dataset average will be reported in the
-1D stats section of the printed summary. For example, with
-`z_thresh=3.0` and `count_thresh=20`, a dataset of items in a retail store,
-and an output called "Total Sales", we might see the following as part of our
-summary if we have a feature called "Price":
-```
-Total Sales global mean: 4.1, global stddev: 2.2
-
-***1D stats***
-
-Price:
-  0: 5.2 (z: 4.8, #: 101)
-  1: 3.2 (z: -3.6, #: 75)
-```
-Continuous features and outputs are discretized into buckets, and the average Total Sales
-bucket across the entire dataset is 4.1 with standard deviation 2.2. The 101 datapoints with
-Price bucket 0 have an average Total Sales of 5.2, which is 4.8 standard deviations
-above the mean of 4.1 and therefore significant at `z_thresh=3.0`. Likewise for the 75 datapoints with Price bucket 1.
-
-The 2D stats section shows any pairs of feature values that are interesting. If we had a
-second feature called "Department", we might see the following as part of our summary:
-```
-***2D stats***
-
-Price/Department:
-  0/Shoes: 7.0 (z: 3.1, #: 20)
-```
-This shows that the 20 datapoints with Price bucket 0 and Department=Shoes have an average
-Total Sales value of 7.0, which is at least 3.1 standard deviations from both the average
-for all datapoints with Price bucket 0 and the average for all datapoints with
-Department=Shoes. The same `z_thresh` and `count_thresh` from the 1D stats are used for
-the 2D stats.
+## Rule Engine
+Rule Engine (RE) creates an interpretable anomaly classifier from many one-feature and
+two-feature decision rules. It works natively on categorical tabular training data,
+and automatically discretizes continuous features. It searches over
+all rules of the form `F1 = X` and `F1 = X && F2 = Y`, where `F1` and
+`F2` are features and `X` and `Y` are possible values for those features.
+RE creates a classifier out of all rules classifying at least `c` 
+training examples with at least `p` precision, where `c` and
+`p` are provided by the user. The classifier classifies a test example as an
+anomaly if any of its rules fires. RE can prune redundant rules
+to improve overall precision and display rules in an easily understandable format.
 
 String, int, and double features are supported. String
 features with cardinality up to 100 will be considered categorical, and others will be discarded.
 Int/double features  with cardinality up to 50 will be considered categorical, while others will
 be discretized into 15 buckets of equal size, plus a separate
-bucket for nulls. The output variable must be int or double. If it has cardinality
-above 50, it will be discretized the same way as the features. If not, it is
-expected to have values in the range [0, 256), and will be floored to int type if it
-is double.
+bucket for nulls. The class variable must be binary.
+
+See `rookies.py` for the key APIs and example usage.
 
 ## Installation
 Install pandas and pyarrow (python3). We recommend installing these
@@ -60,17 +26,14 @@ with `source cube_venv/bin/activate`. On macOS, install llvm with
 `brew install llvm`.
 
 Build the C++ library with
-`<FLAG> ./build.sh`, where `<FLAG>` can be `SIM=1` (CPU), `GPU=1` or
+`<FLAG> ./build.sh`, where `<FLAG>` can be empty (CPU), `GPU=1` or
 `FPGA=1` depending on the desired accelerator. If there are complaints about
 missing `Python.h`, you may need to install the package `python3-dev` or
 `python3-devel`. The GPU build requires
 the `nvcc` compiler, which should be available in any GPU-specific
 AMI on EC2, such as the deep learning AMIs. Details on the FPGA build are below.
 
-Modify rookies.py to load your dataset. Pass in the dataset, desired output 
-column, `z_thresh`, `count_thresh`, and whether results with a null feature value
-should be shown. Run with `python3 rookies.py` to see the printed summary.
-rand.py is an example that uses randomly generated data.
+Run our example with `python3 rookies.py`.
 
 ### FPGA Setup
 Start an Amazon F1 instance with the latest FPGA AMI (tested with
@@ -92,6 +55,5 @@ https://github.com/jjthomas/DataCubeFPGA.
 
 ## Example Data
 We include an example dataset Rookies.csv, which includes rookie-year stats for all NBA
-players through 2017. We look at which feature values and pairs of values are interesting
-with respect to the "IFAS" output, which is a binary variable indicating whether
+players through 2017. The class variable "IFAS" indicates whether
 the player ever became an all-star in their career.
