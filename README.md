@@ -2,7 +2,7 @@
 Rule Engine (RE) creates an interpretable anomaly classifier from many one-feature and
 two-feature decision rules. It works natively on categorical tabular training data,
 and automatically discretizes continuous features. It searches over
-all rules of the form `F1 = X` and `F1 = X && F2 = Y`, where `F1` and
+all rules of the forms `F1 = X` and `F1 = X && F2 = Y`, where `F1` and
 `F2` are features and `X` and `Y` are possible values for those features.
 RE creates a classifier out of all rules classifying at least `c` 
 training examples with at least `p` precision, where `c` and
@@ -10,19 +10,13 @@ training examples with at least `p` precision, where `c` and
 anomaly if any of its rules fires. RE can prune redundant rules
 to improve overall precision and display rules in an easily understandable format.
 
-String, int, and double features are supported. String
-features with cardinality up to 100 will be considered categorical, and others will be discarded.
-Int/double features  with cardinality up to 50 will be considered categorical, while others will
-be discretized into 15 buckets of equal size, plus a separate
-bucket for nulls. The class variable must be binary.
-
 See `rookies.py` for the key APIs and example usage.
 
 ## Installation
 Install pandas and pyarrow (python3). We recommend installing these
 packages inside a virtualenv,
-which can be created with `python3 -m venv cube_venv` and then entered
-with `source cube_venv/bin/activate`. On macOS, install llvm with
+which can be created with `python3 -m venv rule_venv` and then entered
+with `source rule_venv/bin/activate`. On macOS, install llvm with
 `brew install llvm`.
 
 Build the C++ library with

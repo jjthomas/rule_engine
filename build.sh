@@ -23,8 +23,8 @@ elif [[ "$FPGA" == "1" ]]; then
   EXTRA_FILES="fpga.o"
   EXTRA_LINK="-lfpga_mgmt"
 else
-  $CC $CFLAGS -std=c++11 -fopenmp -fPIC -c sim.cpp -o sim.o
-  EXTRA_FILES="sim.o"
+  $CC $CFLAGS -std=c++11 -fopenmp -fPIC -c cpu.cpp -o cpu.o
+  EXTRA_FILES="cpu.o"
 fi
-$CC $CFLAGS -std=c++11 -fopenmp -I$PA_INC -I$PY_INC -fPIC cube.cpp $EXTRA_FILES -shared -o libcube $PA_LIB $PY_LIB $OMP_LIB -larrow -larrow_python $PY_LIB_NAME $EXTRA_LINK
+$CC $CFLAGS -std=c++11 -fopenmp -I$PA_INC -I$PY_INC -fPIC rule_engine.cpp $EXTRA_FILES -shared -o librule $PA_LIB $PY_LIB $OMP_LIB -larrow -larrow_python $PY_LIB_NAME $EXTRA_LINK
 
