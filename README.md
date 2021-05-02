@@ -7,7 +7,7 @@ all rules of the forms `F1 = X` and `F1 = X && F2 = Y`, where `F1` and
 RE creates a classifier out of all rules classifying at least `c` 
 training examples with at least `p` precision, where `c` and
 `p` are provided by the user. The classifier classifies a test example as an
-anomaly if any of its rules fires. RE can prune redundant rules
+anomaly if any of its rules fire. RE can prune redundant rules
 to improve overall precision and display rules in an easily understandable format.
 
 See `rookies.py` for the key APIs and example usage.
