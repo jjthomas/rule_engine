@@ -25,12 +25,13 @@ class Sums:
     c_lib.free_sums(self.ptr)
 
   def get_rules(self, pos_thresh, min_count):
-    return c_lib.get_rules(self.ptr, pos_thresh, min_count).to_pandas()
+    r = c_lib.get_rules(self.ptr, pos_thresh, min_count).to_pandas()
+    return r.sort_values(by='count', ascending=False).reset_index(drop=True)
 
   def prune_rules(self, df, rules, pos_thresh, min_count):
-    t = pa.Table.from_pandas(df)
+    t = pa.Table.from_pandas(df, preserve_index=False)
     rules = rules.sort_values(by='count', ascending=False)
-    r = pa.Table.from_pandas(rules)
+    r = pa.Table.from_pandas(rules, preserve_index=False)
     idxs = c_lib.prune_rules(self.ptr, t, r,
       df.columns.get_loc(self.metric_col), pos_thresh, min_count).to_pandas()
     return rules.iloc[idxs].reset_index(drop=True)
@@ -58,20 +59,21 @@ class Sums:
       print(res)
 
   def evaluate(self, df, rules):
-    t = pa.Table.from_pandas(df)
-    r = pa.Table.from_pandas(rules)
+    t = pa.Table.from_pandas(df, preserve_index=False)
+    r = pa.Table.from_pandas(rules, preserve_index=False)
     return c_lib.evaluate(self.ptr, t, r).to_pandas()
 
   def evaluate_summary(self, df, rules):
     preds = self.evaluate(df, rules)
     total_pred = preds.sum()
-    pred_correct = (df[self.metric_col] & preds).sum()
-    total_true = df[self.metric_col].sum()
+    true_labels = df[self.metric_col].reset_index(drop=True)
+    pred_correct = (true_labels & preds).sum()
+    total_true = true_labels.sum()
     # precision, recall
     return (pred_correct / total_pred, pred_correct / total_true)
 
 def compute_sums(df, metric_col):
-  table = pa.Table.from_pandas(df)
+  table = pa.Table.from_pandas(df, preserve_index=False)
   return Sums(c_lib.compute_sums(table, df.columns.get_loc(metric_col)),
               metric_col)
 
