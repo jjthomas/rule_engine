@@ -2,7 +2,7 @@
 Rule Engine (RE) creates an interpretable anomaly classifier from many one-feature and
 two-feature decision rules. It works natively on categorical tabular training data,
 and automatically discretizes continuous features. It searches over
-all rules of the forms `F1 = X` and `F1 = X && F2 = Y`, where `F1` and
+all rules of the forms `if (F1 = X) => anomaly` and `if (F1 = X && F2 = Y) => anomaly`, where `F1` and
 `F2` are features and `X` and `Y` are possible values for those features.
 RE creates a classifier out of all rules classifying at least `c` 
 training examples with at least `p` precision, where `c` and
