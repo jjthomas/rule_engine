@@ -1,13 +1,13 @@
 ## Rule Engine
 Rule Engine (RE) creates an interpretable anomaly classifier from many one-feature and
-two-feature decision rules. It works natively on categorical tabular training data,
+two-feature decision rules. It works natively on labeled, categorical training data,
 and automatically discretizes continuous features. It searches over
 all rules of the forms `if (F1 = X) => anomaly` and `if (F1 = X && F2 = Y) => anomaly`, where `F1` and
 `F2` are features and `X` and `Y` are possible values for those features.
 RE creates a classifier out of all rules classifying at least `c` 
 training examples with at least `p` precision, where `c` and
 `p` are provided by the user. The classifier classifies a test example as an
-anomaly if any of its rules fire. RE can prune redundant rules
+anomaly if any of its rules fire. RE can prune overlapping rules
 to improve overall precision and display rules in an easily understandable format.
 
 See `rookies.py` for the key APIs and example usage.
