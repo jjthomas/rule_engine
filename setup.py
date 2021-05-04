@@ -18,7 +18,7 @@ class LibBuild(build_ext):
     extdir = os.path.join(extdir, "rule_engine")
     if not os.path.isdir(extdir):
       os.mkdir(extdir)
-    subprocess.check_call(["./build.sh"])
+    subprocess.check_call(["./build_cpp.sh"])
     try:
       shutil.copy("rule_engine/librule", extdir)
     except shutil.SameFileError:
