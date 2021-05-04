@@ -15,16 +15,16 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
   OMP_LIB="-L/usr/local/opt/llvm/lib"
 fi
 if [[ "$GPU" == "1" ]]; then
-  nvcc $CFLAGS -Xcompiler -fopenmp,-fPIC -c gpu.cu -o gpu.o
-  EXTRA_FILES="gpu.o"
+  nvcc $CFLAGS -Xcompiler -fopenmp,-fPIC -c cpp/gpu.cu -o cpp/gpu.o
+  EXTRA_FILES="cpp/gpu.o"
   EXTRA_LINK="-L/usr/local/cuda/lib64 -lcudart -lcuda"
 elif [[ "$FPGA" == "1" ]]; then
-  $CC $CFLAGS -std=c++11 -fopenmp -I$F1_SDK/userspace/include -fPIC -c fpga.cpp -o fpga.o
-  EXTRA_FILES="fpga.o"
+  $CC $CFLAGS -std=c++11 -fopenmp -I$F1_SDK/userspace/include -fPIC -c cpp/fpga.cpp -o cpp/fpga.o
+  EXTRA_FILES="cpp/fpga.o"
   EXTRA_LINK="-lfpga_mgmt"
 else
-  $CC $CFLAGS -std=c++11 -fopenmp -fPIC -c cpu.cpp -o cpu.o
-  EXTRA_FILES="cpu.o"
+  $CC $CFLAGS -std=c++11 -fopenmp -fPIC -c cpp/cpu.cpp -o cpp/cpu.o
+  EXTRA_FILES="cpp/cpu.o"
 fi
-$CC $CFLAGS -std=c++11 -fopenmp -I$PA_INC -I$PY_INC -fPIC rule_engine.cpp $EXTRA_FILES -shared -o librule $PA_LIB $PY_LIB $OMP_LIB -larrow -larrow_python $PY_LIB_NAME $EXTRA_LINK
+$CC $CFLAGS -std=c++11 -fopenmp -I$PA_INC -I$PY_INC -fPIC cpp/rule_engine.cpp $EXTRA_FILES -shared -o rule_engine/librule $PA_LIB $PY_LIB $OMP_LIB -larrow -larrow_python $PY_LIB_NAME $EXTRA_LINK
 

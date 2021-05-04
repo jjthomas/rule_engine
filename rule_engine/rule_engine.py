@@ -1,7 +1,9 @@
 import ctypes
 import pyarrow as pa
+import os
 
-c_lib = ctypes.CDLL("librule")
+this_dir = os.path.abspath(os.path.dirname(__file__))
+c_lib = ctypes.CDLL(os.path.join(this_dir, "librule"))
 c_lib.compute_sums.argtypes = [ctypes.py_object, ctypes.c_int]
 c_lib.compute_sums.restype = ctypes.c_void_p
 c_lib.get_col_map.argtypes = [ctypes.c_void_p]
