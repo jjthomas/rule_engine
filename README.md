@@ -12,6 +12,8 @@ to improve overall precision and display rules in an easily understandable forma
 
 See `examples/rookies.py` for the key APIs and example usage.
 
+A presentation on this work is available here: https://cs.stanford.edu/~jjthomas/dataai-pres.pdf.
+
 ## Installation
 On macOS, install llvm with `brew install llvm`.
 
@@ -45,3 +47,5 @@ https://github.com/jjthomas/DataCubeFPGA.
 We include an example dataset `examples/Rookies.csv`, which includes rookie-year stats for all NBA
 players through 2017. The class variable "IFAS" indicates whether
 the player ever became an all-star in their career.
+
+Other anomaly detection datasets are available here: https://github.com/GuansongPang/anomaly-detection-datasets.
