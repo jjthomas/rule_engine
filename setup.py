@@ -19,7 +19,10 @@ class LibBuild(build_ext):
     if not os.path.isdir(extdir):
       os.mkdir(extdir)
     subprocess.check_call(["./build.sh"])
-    shutil.copy("rule_engine/librule", extdir)
+    try:
+      shutil.copy("rule_engine/librule", extdir)
+    except shutil.SameFileError:
+      pass # happens with pip install -e
 
 setup(
   name='rule_engine',
