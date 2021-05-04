@@ -1,8 +1,10 @@
 #!/bin/bash
 
-if [[ $(sudo fpga-describe-local-image -S 0 -H) != *"$(cat fpga_afi.txt)"* ]]; then
+AGFI=agfi-023ca8e2707196e49
+
+if [[ $(sudo fpga-describe-local-image -S 0 -H) != *"$AGFI"* ]]; then
   echo "Loading AFI..."
-  sudo fpga-load-local-image -S 0 -I $(cat fpga_afi.txt) > /dev/null
+  sudo fpga-load-local-image -S 0 -I $AGFI > /dev/null
 fi
 
 args="${@:2}"
