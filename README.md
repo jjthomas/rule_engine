@@ -10,44 +10,38 @@ training examples with at least `p` precision, where `c` and
 anomaly if any of its rules fire. RE can prune overlapping rules
 to improve overall precision and display rules in an easily understandable format.
 
-See `rookies.py` for the key APIs and example usage.
+See `examples/rookies.py` for the key APIs and example usage.
 
 ## Installation
-Install pandas and pyarrow (python3). We recommend installing these
-packages inside a virtualenv,
-which can be created with `python3 -m venv rule_venv` and then entered
-with `source rule_venv/bin/activate`. On macOS, install llvm with
-`brew install llvm`.
+On macOS, install llvm with `brew install llvm`.
 
-Build the C++ library with
-`<FLAG> ./build.sh`, where `<FLAG>` can be empty (CPU), `GPU=1` or
+Install `rule_engine` with
+`<FLAG> pip install .` from the top of this repo, where `<FLAG>` can be empty (CPU), `GPU=1` or
 `FPGA=1` depending on the desired accelerator. If there are complaints about
 missing `Python.h`, you may need to install the package `python3-dev` or
 `python3-devel`. The GPU build requires
-the `nvcc` compiler, which should be available in any GPU-specific
-AMI on EC2, such as the deep learning AMIs. Details on the FPGA build are below.
+the `nvcc` compiler. Details on the FPGA build are below.
 
-Run our example with `python3 rookies.py`.
+Run our example from the `examples` directory with `python3 rookies.py`.
 
 ### FPGA Setup
-Start an Amazon F1 instance with the latest FPGA AMI (tested with
-Centos AMI 1.9.1). Clone the F1 SDK from https://github.com/aws/aws-fpga.
+FPGA-accelerated installation must be performed on an Amazon F1 instance with a recent FPGA AMI (tested with
+Centos AMI 1.9.1). Before running `pip install`, clone the F1 SDK from https://github.com/aws/aws-fpga.
 Run `source sdk_setup.sh`. Then follow the XDMA driver installation instructions
 at `sdk/linux_kernel_drivers/xdma/xdma_install.md`. Set the environment variable
 `F1_SDK` to the path to the sdk directory in the .bashrc or equivalent.
 
-Follow the instructions above to install the Python dependencies and
-build the C++ library. If you see an error 
+If you see an error during `pip install`
 about the `static` keyword in the AWS SDK, simply delete the keyword from the
 offending location and everything should work.
 
-To run a Python script, instead of directly calling python, use
-`./run_script.sh <script name> <script args...>`.
+To run a Python script using `rule_engine` with FPGA acceleration, instead of directly calling python, use
+`./fpga_run.sh <script name> <script args...>`.
 
 To see the RTL for the FPGA image and to actually build it yourself, check out
 https://github.com/jjthomas/DataCubeFPGA.
 
 ## Example Data
-We include an example dataset Rookies.csv, which includes rookie-year stats for all NBA
+We include an example dataset `examples/Rookies.csv`, which includes rookie-year stats for all NBA
 players through 2017. The class variable "IFAS" indicates whether
 the player ever became an all-star in their career.
