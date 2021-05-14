@@ -24,6 +24,11 @@ class LibBuild(build_ext):
     except shutil.SameFileError:
       pass # happens with pip install -e
 
+if os.environ.get("FPGA") == "1":
+  scripts = ['bin/fpga_python']
+else:
+  scripts = []
+
 setup(
   name='rule_engine',
   version='0.1',
@@ -40,5 +45,6 @@ setup(
   ],
   ext_modules=[LibExtension('librule')],
   cmdclass=dict(build_ext=LibBuild),
+  scripts=scripts,
   python_requires='>=3.6'
 )

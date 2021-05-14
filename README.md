@@ -31,14 +31,14 @@ FPGA-accelerated installation must be performed on an Amazon F1 instance with a 
 Centos AMI 1.9.1). Before running `pip install`, clone the F1 SDK from https://github.com/aws/aws-fpga.
 Run `source sdk_setup.sh`. Then follow the XDMA driver installation instructions
 at `sdk/linux_kernel_drivers/xdma/xdma_install.md`. Set the environment variable
-`F1_SDK` to the path to the sdk directory in the .bashrc or equivalent.
+`F1_SDK` to the path to the `sdk` directory in the .bashrc or equivalent.
 
 If you see an error during `pip install`
 about the `static` keyword in the AWS SDK, simply delete the keyword from the
 offending location and everything should work.
 
-To run a Python script using `rule_engine` with FPGA acceleration, instead of directly calling python, use
-`./fpga_run.sh <script name> <script args...>`.
+To run a Python script using `rule_engine` with FPGA acceleration, instead of directly calling `python`, use
+`fpga_python`, e.g. `fpga_python rookies.py`.
 
 To see the RTL for the FPGA image and to actually build it yourself, check out
 https://github.com/jjthomas/DataCubeFPGA.
