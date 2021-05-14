@@ -29,9 +29,9 @@ Run our example from the `examples` directory with `python3 rookies.py`.
 ### FPGA Setup
 FPGA-accelerated installation must be performed on an Amazon F1 instance with a recent FPGA AMI (tested with
 Centos AMI 1.9.1). Before running `pip install`, clone the F1 SDK from https://github.com/aws/aws-fpga.
-Run `source sdk_setup.sh`. Then follow the XDMA driver installation instructions
-at `sdk/linux_kernel_drivers/xdma/xdma_install.md`. Set the environment variable
-`F1_SDK` to the path to the `sdk` directory in the .bashrc or equivalent.
+Run `source sdk_setup.sh` from the top of `aws-fpga`. Then follow the XDMA driver installation instructions
+at `aws-fpga/sdk/linux_kernel_drivers/xdma/xdma_install.md`. Set the environment variable
+`F1_SDK` to the path to the `aws-fpga/sdk` directory in the .bashrc or equivalent.
 
 If you see an error during `pip install`
 about the `static` keyword in the AWS SDK, simply delete the keyword from the
