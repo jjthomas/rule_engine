@@ -28,11 +28,11 @@ class Sums:
 
   def get_rules(self, pos_thresh, min_count):
     r = c_lib.get_rules(self.ptr, pos_thresh, min_count).to_pandas()
-    return r.sort_values(by='count', ascending=False).reset_index(drop=True)
+    return r.sort_values(by='count', kind='mergesort', ascending=False).reset_index(drop=True)
 
   def prune_rules(self, df, rules, pos_thresh, min_count):
     t = pa.Table.from_pandas(df, preserve_index=False)
-    rules = rules.sort_values(by='count', ascending=False)
+    rules = rules.sort_values(by='count', kind='mergesort', ascending=False)
     r = pa.Table.from_pandas(rules, preserve_index=False)
     idxs = c_lib.prune_rules(self.ptr, t, r,
       df.columns.get_loc(self.metric_col), pos_thresh, min_count).to_pandas()
