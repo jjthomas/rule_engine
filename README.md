@@ -10,6 +10,10 @@ training examples with at least `p` precision, where `c` and
 anomaly if any of its rules fire. RE can prune overlapping rules
 to improve overall precision and display rules in an easily understandable format.
 
+RE is fast, with a high-performance C++ backend and experimental
+GPU and FPGA acceleration available. It can scale to large datasets
+with ~1000 features.
+
 See `examples/rookies.py` for the key APIs and example usage.
 
 A presentation on this work is available here: https://cs.stanford.edu/~jjthomas/dataai-pres.pdf.
