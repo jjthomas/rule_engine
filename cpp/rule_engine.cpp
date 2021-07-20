@@ -615,15 +615,13 @@ extern "C" PyObject *prune_rules(void *sums, PyObject *table, PyObject *rules,
   std::vector<int64_t> chosen_rules;
   for (int64_t i = 0; i < r->num_rows(); i++) {
     int64_t pos_new = 0, neg_new = 0;
-    #pragma omp parallel for
+    #pragma omp parallel for reduction(+: pos_new, neg_new)
     for (int64_t j = 0; j < cols[0].size(); j++) {
       if (cols[col1[i]][j] == col1val[i] &&
           (col2[i] == -1 || cols[col2[i]][j] == col2val[i]) && classified[j] == 0) {
         if (metric[j] == 1) {
-          #pragma omp atomic
           pos_new++;
         } else {
-          #pragma omp atomic
           neg_new++;
         }
         classified[j] = 1;
