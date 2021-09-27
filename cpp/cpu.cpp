@@ -3,6 +3,7 @@
 #include <string.h>
 #include <vector>
 #include <algorithm>
+#include <sys/time.h>
 
 extern "C" void compute2d_acc(uint8_t **, int, int, uint8_t *, uint32_t *);
 
@@ -15,6 +16,8 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
       idx_mapping.emplace_back(i, j);
     }
   }
+  struct timeval start, end, diff;
+  gettimeofday(&start, 0);
   #pragma omp parallel for
   for (int pair_idx = 0; pair_idx < num_pairs; pair_idx++) {
     int i = idx_mapping[pair_idx].first;
@@ -26,4 +29,7 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
       our_stats[2 * stats_idx + 1]++;
     }
   }
+  gettimeofday(&end, 0);
+  timersub(&end, &start, &diff);
+  printf("CPU accelerator time: %ld.%06ld\n", (long)diff.tv_sec, (long)diff.tv_usec);
 }

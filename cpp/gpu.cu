@@ -53,6 +53,8 @@ __global__ void run(uint8_t **input, uint8_t *metric, uint32_t num_rows, uint32_
 void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, uint32_t *stats) {
   assert(cudaSetDevice(0) == cudaSuccess);
 
+  struct timeval start, end, diff, total;
+  gettimeofday(&start, 0);
   uint8_t **input_dev;
   assert(cudaMalloc((void **) &input_dev, sizeof(uint8_t *) * num_cols) == cudaSuccess);
   uint8_t **col_dev_ptrs = (uint8_t **)malloc(sizeof(uint8_t *) * num_cols);
@@ -64,6 +66,8 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
   uint8_t *metric_dev;
   assert(cudaMalloc((void **) &metric_dev, num_rows) == cudaSuccess);
   cudaMemcpy(metric_dev, metric, num_rows, cudaMemcpyHostToDevice);
+  gettimeofday(&end, 0);
+  timersub(&end, &start, &total);
 
   int num_pairs = num_cols * (num_cols - 1) / 2;
   int block_idxs_size = sizeof(uint32_t) * 2 * num_pairs;
@@ -84,10 +88,19 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
   int output_size = sizeof(uint32_t) * 512 * num_pairs;
   assert(cudaMalloc((void **) &output_dev, output_size) == cudaSuccess);
 
+  gettimeofday(&start, 0);
   run<<<num_pairs, BLOCK_SIZE>>>(input_dev, metric_dev, num_rows, num_cols, block_idxs_dev, output_dev);
   assert(cudaDeviceSynchronize() == cudaSuccess);
+  gettimeofday(&end, 0);
+  timersub(&end, &start, &diff);
+  printf("GPU accelerator time: %ld.%06ld\n", (long)diff.tv_sec, (long)diff.tv_usec);
 
+  gettimeofday(&start, 0);
   cudaMemcpy(stats, output_dev, output_size, cudaMemcpyDeviceToHost);
+  gettimeofday(&end, 0);
+  timersub(&end, &start, &diff);
+  timeradd(&diff, &total, &total);
+  printf("GPU data transfer time: %ld.%06ld\n", (long)total.tv_sec, (long)total.tv_usec);
 
   cudaFree(output_dev);
   cudaFree(block_idxs_dev);

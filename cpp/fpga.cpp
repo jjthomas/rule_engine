@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <thread>
 #include <sys/mman.h>
+#include <sys/time.h>
 
 #include "fpga_pci.h"
 #include "fpga_mgmt.h"
@@ -16,6 +17,8 @@ extern "C" void compute2d_acc(uint8_t **, int, int, uint8_t *, uint32_t *);
 #define BLOCK_SIZE 48
 // Must be from 1-4
 #define NUM_WRITE_THREADS 4
+
+#define FINE_TIME
 
 void write_data(int write_fd, uint8_t *buf, int length, int addr) {
   fpga_dma_burst_write(write_fd, buf, length, addr);
@@ -39,11 +42,20 @@ void run(int read_fd, int write_fds[NUM_WRITE_THREADS], pci_bar_handle_t pci_bar
       }
     }
   }
+#ifdef FINE_TIME
+  struct timeval start, end, diff;
+  gettimeofday(&start, 0);
+#endif
   uint32_t reg_peek;
   do {
     fpga_pci_peek(pci_bar_handle, 0x600, &reg_peek);
     usleep(1000);
   } while (reg_peek != 0);
+#ifdef FINE_TIME
+  gettimeofday(&end, 0);
+  timersub(&end, &start, &diff);
+  printf("FPGA wait time: %ld.%06ld\n", (long)diff.tv_sec, (long)diff.tv_usec);
+#endif
   fpga_pci_poke(pci_bar_handle, 0x800, buf_c ? 1 : 0);
   if (input_buf != NULL) {
     fpga_pci_poke(pci_bar_handle, 0x600, 1);
@@ -105,6 +117,8 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
   fpga_pci_poke(pci_bar_handle, 0x800, 0); // set buf to DDR C
   bool buf_c = true;
   int last_i = 0, last_j = 0;
+  struct timeval start, end, diff;
+  gettimeofday(&start, 0);
   for (int i = 0; i < num_blocks; i++) {
     #pragma omp parallel for
     for (int j = 0; j < num_rows; j++) {
@@ -116,6 +130,10 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
     // final iteration to collect last output
     int bound = i == num_blocks - 1 ? num_blocks + 1 : num_blocks;
     for (int j = i; j < bound; j++) {
+#ifdef FINE_TIME
+      struct timeval it_start, it_end, it_diff;
+      gettimeofday(&it_start, 0);
+#endif
       if (j != num_blocks) {
         #pragma omp parallel for
         for (int k = 0; k < num_rows; k++) {
@@ -146,11 +164,19 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
           }
         }
       }
+#ifdef FINE_TIME
+      gettimeofday(&it_end, 0);
+      timersub(&it_end, &it_start, &it_diff);
+      printf("FPGA iteration time: %ld.%06ld\n", (long)it_diff.tv_sec, (long)it_diff.tv_usec);
+#endif
       last_i = i;
       last_j = j;
       buf_c = !buf_c;
     }
   }
+  gettimeofday(&end, 0);
+  timersub(&end, &start, &diff);
+  printf("FPGA accelerator time: %ld.%06ld\n", (long)diff.tv_sec, (long)diff.tv_usec);
   munmap(input_buf, input_buf_size);
   munmap(output_buf, output_buf_size);
   close(read_fd);
