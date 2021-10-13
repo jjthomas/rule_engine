@@ -20,21 +20,22 @@ extern "C" void compute2d_acc(uint8_t **, int, int, uint8_t *, uint32_t *);
 
 #define FINE_TIME
 
-void write_data(int write_fd, uint8_t *buf, int length, int addr) {
-  fpga_dma_burst_write(write_fd, buf, length, addr);
+void write_data(int write_fd, uint8_t *buf0, uint8_t *buf1, int length, int addr) {
+  fpga_dma_burst_write(write_fd, buf0, length, addr);
+  fpga_dma_burst_write(write_fd, buf1, length, 1000000000 + addr);
 }
 
-void run(int read_fd, int write_fds[NUM_WRITE_THREADS], pci_bar_handle_t pci_bar_handle, uint8_t *input_buf,
-  int input_buf_size, uint8_t *output_buf, int output_buf_size, bool buf_c) {
-  if (input_buf != NULL) {
+void run(int read_fd, int write_fds[NUM_WRITE_THREADS], pci_bar_handle_t pci_bar_handle, uint8_t *input_buf0,
+  uint8_t *input_buf1, int input_buf_size, uint8_t *output_buf, int output_buf_size, bool buf_c) {
+  if (input_buf0 != NULL) {
     if (NUM_WRITE_THREADS == 1) {
-      write_data(write_fds[0], input_buf, input_buf_size, 0);
+      write_data(write_fds[0], input_buf0, input_buf1, input_buf_size, 0);
     } else {
       int chunk_size = input_buf_size / NUM_WRITE_THREADS;
       std::vector<std::thread> threads;
       for (int i = 0; i < NUM_WRITE_THREADS; i++) {
         int offset = i * chunk_size;
-        threads.push_back(std::thread(write_data, write_fds[i], input_buf + offset,
+        threads.push_back(std::thread(write_data, write_fds[i], input_buf0 + offset, input_buf1 + offset,
           i == NUM_WRITE_THREADS - 1 ? input_buf_size - offset : chunk_size, offset));
       }
       for (auto& t : threads) {
@@ -82,36 +83,38 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
     printf("ERROR: PCI attach\n");
   }
 
-  int input_buf_size = 64 * (num_rows + 1);
+  int block_bytes = 64 * ((num_rows + 1) / 2 + 1);
+  int num_blocks = (num_cols + BLOCK_SIZE - 1) / BLOCK_SIZE;
+  uint64_t input_buf_size = (uint64_t)block_bytes * num_blocks;
   uint8_t *input_buf = (uint8_t *)mmap(NULL, input_buf_size, PROT_READ | PROT_WRITE,
     MAP_ANON | MAP_PRIVATE, -1, 0);
-  *((uint32_t *)input_buf) = num_rows; // store length in first line
-  uint8_t *input_data = input_buf + 64;
   int output_buf_size = sizeof(uint32_t) * 512 * BLOCK_SIZE * BLOCK_SIZE;
   uint32_t *output_buf = (uint32_t *)mmap(NULL, output_buf_size,
     PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
 
-  int num_blocks = (num_cols + BLOCK_SIZE - 1) / BLOCK_SIZE;
-  std::vector<std::vector<uint64_t>> blocks(num_blocks);
   for (int i = 0; i < num_blocks; i++) {
-    std::vector<uint64_t> block(num_rows * 3); // 24 bytes per block row
+    uint8_t *block = input_buf + block_bytes * i;
+    *((uint32_t *)block) = num_rows;
+    block += 64;
     int start_col = i * BLOCK_SIZE;
     int end_col = std::min(num_cols, start_col + BLOCK_SIZE);
     #pragma omp parallel for
-    for (int j = 0; j < num_rows; j++) {
-      for (int k = 0; k < 3; k++) {
-        uint64_t word = 0;
-        for (int l = std::min(end_col, start_col + 16 * (k + 1)) - 1; l >= start_col + 16 * k; l--) {
-          word = (word << 4) | cols[l][j];
+    for (int j = 0; j < (num_rows + 1) / 2; j++) {
+      int start_row = j * 2;
+      uint64_t *block_row = (uint64_t *)(block + j * 64);
+      uint64_t metric_word = 0;
+      for (int k = 0; k < std::min(num_rows - start_row, 2); k++) {
+        for (int l = 0; l < 3; l++) {
+          uint64_t word = 0;
+          for (int m = std::min(end_col, start_col + 16 * (l + 1)) - 1; m >= start_col + 16 * l; m--) {
+            word = (word << 4) | cols[m][start_row + k];
+          }
+          block_row[3 * k + l] = word;
         }
-        block[3 * j + k] = word;
+        metric_word |= metric[start_row + k] << (8 * k);
       }
+      block_row[6] = metric_word;
     }
-    blocks[i] = std::move(block);
-  }
-  #pragma omp parallel for
-  for (int i = 0; i < num_rows; i++) {
-    input_data[64 * i + 48] = metric[i];
   }
 
   fpga_pci_poke(pci_bar_handle, 0x800, 0); // set buf to DDR C
@@ -120,13 +123,6 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
   struct timeval start, end, diff;
   gettimeofday(&start, 0);
   for (int i = 0; i < num_blocks; i++) {
-    #pragma omp parallel for
-    for (int j = 0; j < num_rows; j++) {
-      uint64_t *cur_row = (uint64_t *)(input_data + 64 * j);
-      for (int k = 0; k < 3; k++) {
-        cur_row[k] = blocks[i][3 * j + k];
-      }
-    }
     // final iteration to collect last output
     int bound = i == num_blocks - 1 ? num_blocks + 1 : num_blocks;
     for (int j = i; j < bound; j++) {
@@ -134,17 +130,9 @@ void compute2d_acc(uint8_t **cols, int num_rows, int num_cols, uint8_t *metric, 
       struct timeval it_start, it_end, it_diff;
       gettimeofday(&it_start, 0);
 #endif
-      if (j != num_blocks) {
-        #pragma omp parallel for
-        for (int k = 0; k < num_rows; k++) {
-          uint64_t *cur_row = (uint64_t *)(input_data + 64 * k + 24);
-          for (int l = 0; l < 3; l++) {
-            cur_row[l] = blocks[j][3 * k + l];
-          }
-        }
-      }
       run(read_fd, write_fds, pci_bar_handle,
-        j == num_blocks ? NULL : input_buf, input_buf_size,
+        j == num_blocks ? NULL : input_buf + block_bytes * i,
+        j == num_blocks ? NULL : input_buf + block_bytes * j, block_bytes,
         i == 0 && j == 0 ? NULL : (uint8_t *)output_buf, output_buf_size, buf_c);
       if (!(i == 0 && j == 0)) {
         int i_start_col = last_i * BLOCK_SIZE;
