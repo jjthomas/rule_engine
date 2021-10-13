@@ -58,7 +58,7 @@ void run(int read_fd, int write_fds[NUM_WRITE_THREADS], pci_bar_handle_t pci_bar
   printf("FPGA wait time: %ld.%06ld\n", (long)diff.tv_sec, (long)diff.tv_usec);
 #endif
   fpga_pci_poke(pci_bar_handle, 0x800, buf_c ? 1 : 0);
-  if (input_buf != NULL) {
+  if (input_buf0 != NULL) {
     fpga_pci_poke(pci_bar_handle, 0x600, 1);
   }
   if (output_buf != NULL) {
