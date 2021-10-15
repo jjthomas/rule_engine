@@ -14,32 +14,35 @@
 extern "C" void compute2d_acc(uint8_t **, int, int, uint8_t *, uint32_t *);
 
 // The block encoding code is mostly specific to this size
-#define BLOCK_SIZE 48
+#define BLOCK_SIZE 47
 // Must be from 1-4
 #define NUM_WRITE_THREADS 4
 
 #define FINE_TIME
 
-void write_data(int write_fd, uint8_t *buf0, uint8_t *buf1, int length, int addr) {
-  fpga_dma_burst_write(write_fd, buf0, length, addr);
-  fpga_dma_burst_write(write_fd, buf1, length, 1000000000 + addr);
+void write_data(int write_fd, uint8_t *buf, int length, int addr) {
+  fpga_dma_burst_write(write_fd, buf, length, addr);
 }
 
 void run(int read_fd, int write_fds[NUM_WRITE_THREADS], pci_bar_handle_t pci_bar_handle, uint8_t *input_buf0,
   uint8_t *input_buf1, int input_buf_size, uint8_t *output_buf, int output_buf_size, bool buf_c) {
   if (input_buf0 != NULL) {
-    if (NUM_WRITE_THREADS == 1) {
-      write_data(write_fds[0], input_buf0, input_buf1, input_buf_size, 0);
-    } else {
-      int chunk_size = input_buf_size / NUM_WRITE_THREADS;
-      std::vector<std::thread> threads;
-      for (int i = 0; i < NUM_WRITE_THREADS; i++) {
-        int offset = i * chunk_size;
-        threads.push_back(std::thread(write_data, write_fds[i], input_buf0 + offset, input_buf1 + offset,
-          i == NUM_WRITE_THREADS - 1 ? input_buf_size - offset : chunk_size, offset));
-      }
-      for (auto& t : threads) {
-        t.join();
+    for (int buf_idx = 0; buf_idx < 2; buf_idx++) {
+      fpga_pci_poke(pci_bar_handle, 0x900, buf_idx); // set pci_2nd_ddr when buf_idx == 1
+      uint8_t *cur_buf = buf_idx == 0 ? input_buf0 : input_buf1;
+      if (NUM_WRITE_THREADS == 1) {
+        write_data(write_fds[0], cur_buf, input_buf_size, 0);
+      } else {
+        int chunk_size = input_buf_size / NUM_WRITE_THREADS;
+        std::vector<std::thread> threads;
+        for (int i = 0; i < NUM_WRITE_THREADS; i++) {
+          int offset = i * chunk_size;
+          threads.push_back(std::thread(write_data, write_fds[i], cur_buf,
+            i == NUM_WRITE_THREADS - 1 ? input_buf_size - offset : chunk_size, offset));
+        }
+        for (auto& t : threads) {
+          t.join();
+        }
       }
     }
   }
