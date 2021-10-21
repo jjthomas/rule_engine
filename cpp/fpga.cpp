@@ -14,7 +14,7 @@
 extern "C" void compute2d_acc(uint8_t **, int, int, uint8_t *, uint32_t *);
 
 // The block encoding code is mostly specific to this size
-#define BLOCK_SIZE 48
+#define BLOCK_SIZE 43
 // Must be from 1-4
 #define NUM_WRITE_THREADS 4
 

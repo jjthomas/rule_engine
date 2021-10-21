@@ -1,6 +1,6 @@
 #!/bin/bash
 
-AGFI=agfi-07308ce8d003df554
+AGFI=agfi-0a546ef6da639d835
 
 if [[ $(sudo fpga-describe-local-image -S 0 -H) != *"$AGFI"* ]]; then
   echo "Loading AFI..."
