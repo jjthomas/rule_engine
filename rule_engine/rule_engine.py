@@ -16,6 +16,8 @@ c_lib.prune_rules.argtypes = [ctypes.c_void_p, ctypes.py_object,
 c_lib.prune_rules.restype = ctypes.py_object
 c_lib.evaluate.argtypes = [ctypes.c_void_p, ctypes.py_object, ctypes.py_object]
 c_lib.evaluate.restype = ctypes.py_object
+c_lib.eval_nb.argtypes = [ctypes.c_void_p, ctypes.py_object]
+c_lib.eval_nb.restype = ctypes.py_object
 
 class Sums:
   def __init__(self, ptr, metric_col):
@@ -64,6 +66,10 @@ class Sums:
     t = pa.Table.from_pandas(df, preserve_index=False)
     r = pa.Table.from_pandas(rules, preserve_index=False)
     return c_lib.evaluate(self.ptr, t, r).to_pandas()
+
+  def eval_nb(self, df):
+    t = pa.Table.from_pandas(df, preserve_index=False)
+    return c_lib.eval_nb(self.ptr, t).to_pandas()
 
   def evaluate_summary(self, df, rules):
     preds = self.evaluate(df, rules)

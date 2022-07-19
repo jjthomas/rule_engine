@@ -25,12 +25,12 @@ struct Sums {
   std::map<int, std::vector<double>> double_mappings;
   std::map<int, std::vector<int64_t>> int_mappings;
   std::map<int, std::vector<std::string>> string_mappings;
-  std::vector<int> col_cards;
   std::vector<std::vector<uint64_t>> col_sums;
   std::vector<std::vector<uint64_t>> col_counts;
   std::vector<std::pair<int, int>> split_mapping;
   std::vector<uint64_t> pair_sums;
   std::vector<uint64_t> pair_counts;
+  double metric_mean;
 };
 
 inline bool not_null(const uint8_t *null_map, int64_t pos) {
@@ -375,12 +375,12 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
   sums->double_mappings = std::move(double_mappings);
   sums->int_mappings = std::move(int_mappings);
   sums->string_mappings = std::move(string_mappings);
-  sums->col_cards = std::move(sizes);
   sums->col_sums = std::move(col_sums);
   sums->col_counts = std::move(col_counts);
   sums->split_mapping = std::move(new_mapping);
   sums->pair_sums = std::move(acc_sums);
   sums->pair_counts = std::move(acc_counts);
+  sums->metric_mean = global_avg;
 
   return sums;
 }
@@ -546,38 +546,60 @@ void validate_rules(Sums *s, const int64_t *col1, const int64_t *col1val,
   }
 }
 
+// for binary metrics only
 extern "C" PyObject *eval_nb(void *sums, PyObject *table) {
   arrow::py::PyAcquireGIL lock;
   Sums *s = static_cast<Sums *>(sums);
   auto t = arrow::py::unwrap_table(table).ValueOrDie();
   std::vector<std::vector<uint8_t>> cols = encode_table(s, t);
 
-  std::vector<int> cum_subseq_cards(s->col_cards.size());
-  int cum_card = 0;
-  for (int i = s->col_cards.size() - 1; i >= 0; i--) {
-    cum_subseq_cards[i] = cum_card;
-    cum_card += s->col_cards[i];
+  std::vector<int> col_num_chunks(cols.size());
+  for (const auto& p : s->split_mapping) {
+    col_num_chunks[p.first]++;
   }
 
-  std::vector<double> pred(cols[0].size());
+  std::vector<int> cum_subseq_chunks(col_num_chunks.size());
+  int cum_chunks = 0;
+  for (int i = cum_subseq_chunks.size() - 1; i >= 0; i--) {
+    cum_subseq_chunks[i] = cum_chunks;
+    cum_chunks += col_num_chunks[i];
+  }
+
+  std::vector<double> preds(cols[0].size());
   #pragma omp parallel for
   for (int64_t i = 0; i < cols[0].size(); i++) {
     int64_t idx = 0;
-    for (int64_t j = 0; j < cols[0].size(); j++) {
-      if (cols[col1[i]][j] == col1val[i] &&
-          (col2[i] == -1 || cols[col2[i]][j] == col2val[i])) {
-        pred[j] = 1;
+    for (int j = 0; j < cols.size(); j++) {
+      uint8_t j_chunk = col_num_chunks[j] > 1 ? cols[j][i] / 15 : 0;
+      uint8_t j_val = col_num_chunks[j] > 1 ? cols[j][i] % 15 + 1 : cols[j][i];
+      int64_t offset = 256 * j_chunk * cum_subseq_chunks[j];
+      // skip the self pairs from the first chunk through the current j_chunk
+      offset += 256 * (col_num_chunks[j] * (col_num_chunks[j] - 1) / 2 - (col_num_chunks[j] -
+        j_chunk - 1) * (col_num_chunks[j] - j_chunk - 2) / 2);
+      for (int k = j + 1; k < cols.size(); k++) {
+        uint8_t k_chunk = col_num_chunks[k] > 1 ? cols[k][i] / 15 : 0;
+        uint8_t k_val = col_num_chunks[k] > 1 ? cols[k][i] % 15 + 1 : cols[k][i];
+        int64_t final_idx = idx + offset + 256 * k_chunk + 16 * j_val + k_val;
+        if (s->pair_counts[final_idx] == 0) {
+          preds[i] += log(s->metric_mean);
+        } else {
+          preds[i] += log((double)(s->pair_sums[final_idx] + 1) / s->pair_counts[final_idx]);
+        }
+        offset += 256 * col_num_chunks[k];
       }
+      // first the self pairs within j's chunks, then the subsequent pairs
+      idx += 256 * (col_num_chunks[j] * (col_num_chunks[j] - 1) / 2 + col_num_chunks[j] *
+        cum_subseq_chunks[j]);
     }
   }
 
-  arrow::DoubleBuilder pred_b;
-  for (int64_t i = 0; i < pred.size(); i++) {
-    assert(pred_b.Append(pred[i]).ok());
+  arrow::DoubleBuilder preds_b;
+  for (int64_t i = 0; i < preds.size(); i++) {
+    assert(preds_b.Append(preds[i]).ok());
   }
-  std::shared_ptr<arrow::Array> pred_final;
-  assert(pred_b.Finish(&pred_final).ok());
-  return arrow::py::wrap_array(pred_final);
+  std::shared_ptr<arrow::Array> preds_final;
+  assert(preds_b.Finish(&preds_final).ok());
+  return arrow::py::wrap_array(preds_final);
 }
 
 extern "C" PyObject *evaluate(void *sums, PyObject *table, PyObject *rules) {
