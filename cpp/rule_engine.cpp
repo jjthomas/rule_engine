@@ -25,6 +25,7 @@ struct Sums {
   std::map<int, std::vector<double>> double_mappings;
   std::map<int, std::vector<int64_t>> int_mappings;
   std::map<int, std::vector<std::string>> string_mappings;
+  std::vector<int> col_cards;
   std::vector<std::vector<uint64_t>> col_sums;
   std::vector<std::vector<uint64_t>> col_counts;
   std::vector<std::pair<int, int>> split_mapping;
@@ -374,6 +375,7 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
   sums->double_mappings = std::move(double_mappings);
   sums->int_mappings = std::move(int_mappings);
   sums->string_mappings = std::move(string_mappings);
+  sums->col_cards = std::move(sizes);
   sums->col_sums = std::move(col_sums);
   sums->col_counts = std::move(col_counts);
   sums->split_mapping = std::move(new_mapping);
@@ -542,6 +544,40 @@ void validate_rules(Sums *s, const int64_t *col1, const int64_t *col1val,
     assert(col2[i] == -1 ||
       (col2val[i] >= 1 && col2val[i] < s->col_sums[col2[i]].size()));
   }
+}
+
+extern "C" PyObject *eval_nb(void *sums, PyObject *table) {
+  arrow::py::PyAcquireGIL lock;
+  Sums *s = static_cast<Sums *>(sums);
+  auto t = arrow::py::unwrap_table(table).ValueOrDie();
+  std::vector<std::vector<uint8_t>> cols = encode_table(s, t);
+
+  std::vector<int> cum_subseq_cards(s->col_cards.size());
+  int cum_card = 0;
+  for (int i = s->col_cards.size() - 1; i >= 0; i--) {
+    cum_subseq_cards[i] = cum_card;
+    cum_card += s->col_cards[i];
+  }
+
+  std::vector<double> pred(cols[0].size());
+  #pragma omp parallel for
+  for (int64_t i = 0; i < cols[0].size(); i++) {
+    int64_t idx = 0;
+    for (int64_t j = 0; j < cols[0].size(); j++) {
+      if (cols[col1[i]][j] == col1val[i] &&
+          (col2[i] == -1 || cols[col2[i]][j] == col2val[i])) {
+        pred[j] = 1;
+      }
+    }
+  }
+
+  arrow::DoubleBuilder pred_b;
+  for (int64_t i = 0; i < pred.size(); i++) {
+    assert(pred_b.Append(pred[i]).ok());
+  }
+  std::shared_ptr<arrow::Array> pred_final;
+  assert(pred_b.Finish(&pred_final).ok());
+  return arrow::py::wrap_array(pred_final);
 }
 
 extern "C" PyObject *evaluate(void *sums, PyObject *table, PyObject *rules) {
