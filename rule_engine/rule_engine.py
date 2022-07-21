@@ -45,10 +45,10 @@ class Sums:
       colval -= 1 # correct for null at val 0
       res = "{0} = ".format(self.map[col][0])
       if self.map[col][1] == "c":
-        l, h = self.map[col][2]
-        step = (h - l) / 15
-        res += "{0:.2f} to {1:.2f}".format(l + colval * step,
-          l + (colval + 1) * step)
+        quantiles = self.map[col][2]
+        low = "min" if colval == 0 else "{0:.2f}".format(quantiles[colval - 1])
+        high = "max" if colval == 14 else "{0:.2f}".format(quantiles[colval])
+        res += f"{low} to {high}"
       elif self.map[col][1] == "d":
         res += "{0:.2f}".format(self.map[col][2][colval])
       else: # int or string cat

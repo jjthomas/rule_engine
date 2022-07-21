@@ -3,6 +3,7 @@
 #include <arrow/python/pyarrow.h>
 #include <arrow/python/common.h>
 #include <arrow/api.h>
+#include <arrow/compute/api_aggregate.h>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -21,7 +22,7 @@ extern "C" void compute2d_acc(uint8_t **, int, int, uint8_t *, uint32_t *);
 
 struct Sums {
   std::vector<std::string> col_names;
-  std::map<int, std::pair<double, double>> min_max;
+  std::map<int, std::vector<double>> quantiles;
   std::map<int, std::vector<double>> double_mappings;
   std::map<int, std::vector<int64_t>> int_mappings;
   std::map<int, std::vector<std::string>> string_mappings;
@@ -73,38 +74,31 @@ void enumerate_cat(const T *data, int64_t len, const uint8_t *null_map,
   }
 }
 
-template <typename T>
-std::pair<double, double> get_range_cont(const T *data, int64_t len,
-  const uint8_t *null_map) {
-  int64_t i = 0;
-  while (!not_null(null_map, i)) {
-    i++;
+std::vector<double> get_quantiles(std::shared_ptr<arrow::Array> arr) {
+  std::vector<double> quantiles;
+  for (int i = 1; i < DISC_COUNT; i++) {
+    quantiles.push_back((double)i / DISC_COUNT);
   }
-  T min = data[i];
-  T max = data[i];
-  for (i = i + 1; i < len; i++) {
-    if (not_null(null_map, i)) {
-      if (data[i] > max) {
-        max = data[i];
-      }
-      if (data[i] < min) {
-        min = data[i];
-      }
-    }
+  auto result = std::static_pointer_cast<arrow::DoubleArray>(
+    arrow::compute::TDigest(arr, arrow::compute::TDigestOptions(quantiles))
+      .ValueOrDie().make_array());
+  std::vector<double> q(result->length());
+  for (int i = 0; i < result->length(); i++) {
+    q[i] = result->Value(i);
   }
-  return std::make_pair((double)min, (double)max);
+  return q;
 }
 
 template <typename T>
 void discretize_cont(const T *data, int64_t len, const uint8_t *null_map,
-  std::pair<double, double> range, std::vector<uint8_t>& result) {
-  double min, max;
-  std::tie(min, max) = range;
-  double step = (max - min) / DISC_COUNT;
+  std::vector<double>& quantiles, std::vector<uint8_t>& result) {
   for (int64_t i = 0; i < len; i++) {
     if (not_null(null_map, i)) {
-      double clamped = std::max(min, std::min<double>(data[i], max));
-      result[i] = 1 + std::min<uint8_t>(DISC_COUNT - 1, (clamped - min) / step);
+      uint8_t idx = 0;
+      while (idx < quantiles.size() && data[i] > quantiles[idx]) {
+        idx++;
+      }
+      result[i] = 1 + idx;
     } else {
       result[i] = 0;
     }
@@ -179,7 +173,7 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
   int num_fields = table->schema()->num_fields();
   std::vector<std::vector<uint8_t>> cols_init(num_fields);
   std::vector<ColStatus> col_status(num_fields);
-  std::vector<std::pair<double, double>> min_max_init(num_fields);
+  std::vector<std::vector<double>> quantiles_init(num_fields);
   std::vector<std::vector<double>> double_mappings_init(num_fields);
   std::vector<std::vector<int64_t>> int_mappings_init(num_fields);
   std::vector<std::vector<std::string>> string_mappings_init(num_fields);
@@ -203,10 +197,9 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
             double_mappings_init[i], col);
         } else {
           col_status[i] = CONT;
-          min_max_init[i] = get_range_cont(arr->raw_values(), arr->length(),
-            arr->null_bitmap_data());
+          quantiles_init[i] = std::move(get_quantiles(arr));
           discretize_cont(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
-            min_max_init[i], col);
+            quantiles_init[i], col);
         }
         break;
       }
@@ -239,10 +232,9 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
           }
         } else {
           col_status[i] = CONT;
-          min_max_init[i] = get_range_cont(arr->raw_values(), arr->length(),
-            arr->null_bitmap_data());
+          quantiles_init[i] = std::move(get_quantiles(arr));
           discretize_cont(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
-            min_max_init[i], col);
+            quantiles_init[i], col);
         }
         break;
       }
@@ -273,12 +265,11 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
     return nullptr;
   }
   std::vector<uint8_t> metric_col = std::move(cols_init[metric_idx]);
-  std::pair<double, double> metric_min_max = min_max_init[metric_idx];
 
   std::vector<std::vector<uint8_t>> cols;
   std::vector<int> sizes;
   std::vector<std::string> col_names;
-  std::map<int, std::pair<double, double>> min_max;
+  std::map<int, std::vector<double>> quantiles;
   std::map<int, std::vector<double>> double_mappings;
   std::map<int, std::vector<int64_t>> int_mappings;
   std::map<int, std::vector<std::string>> string_mappings;
@@ -299,7 +290,7 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
       int cur_col = cols.size();
       int size = 1; // always has null
       if (col_status[i] == CONT) {
-        min_max[cur_col] = min_max_init[i];
+        quantiles[cur_col] = quantiles_init[i];
         size += DISC_COUNT;
       } else {
         if (f->type()->id() == arrow::Type::type::DOUBLE) {
@@ -324,7 +315,7 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
       }
       printf("\n");
     } else if (col_status[i] == CONT) {
-      printf("  continuous (%.2f to %.2f)\n", min_max_init[i].first, min_max_init[i].second);
+      printf("  continuous (%.2f to %.2f)\n", quantiles_init[i][0], quantiles_init[i][DISC_COUNT - 2]);
     }
   }
   gettimeofday(&end, 0);
@@ -371,7 +362,7 @@ extern "C" void *compute_sums(PyObject *obj, int metric_idx) {
 
   Sums *sums = new Sums;
   sums->col_names = std::move(col_names);
-  sums->min_max = std::move(min_max);
+  sums->quantiles = std::move(quantiles);
   sums->double_mappings = std::move(double_mappings);
   sums->int_mappings = std::move(int_mappings);
   sums->string_mappings = std::move(string_mappings);
@@ -410,9 +401,9 @@ std::vector<std::vector<uint8_t>> encode_table(Sums *s,
       case arrow::Type::type::DOUBLE: {
         auto arr =
           std::static_pointer_cast<arrow::DoubleArray>(table->column(idx)->chunk(0));
-        if (s->min_max.find(i) != s->min_max.end()) {
+        if (s->quantiles.find(i) != s->quantiles.end()) {
           discretize_cont(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
-            s->min_max[i], cols[i]);
+            s->quantiles[i], cols[i]);
         } else {
           assert(s->double_mappings.find(i) != s->double_mappings.end());
           enumerate_cat(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
@@ -423,9 +414,9 @@ std::vector<std::vector<uint8_t>> encode_table(Sums *s,
       case arrow::Type::type::INT64: {
         auto arr =
           std::static_pointer_cast<arrow::Int64Array>(table->column(idx)->chunk(0));
-        if (s->min_max.find(i) != s->min_max.end()) {
+        if (s->quantiles.find(i) != s->quantiles.end()) {
           discretize_cont(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
-            s->min_max[i], cols[i]);
+            s->quantiles[i], cols[i]);
         } else {
           assert(s->int_mappings.find(i) != s->int_mappings.end());
           enumerate_cat(arr->raw_values(), arr->length(), arr->null_bitmap_data(),
@@ -708,10 +699,14 @@ extern "C" PyObject *get_col_map(void *sums) {
   for (int i = 0; i < s->col_names.size(); i++) {
     PyObject *t = PyTuple_New(3);
     PyTuple_SetItem(t, 0, Py_BuildValue("s", s->col_names[i].c_str()));
-    if (s->min_max.find(i) != s->min_max.end()) {
+    if (s->quantiles.find(i) != s->quantiles.end()) {
       PyTuple_SetItem(t, 1, Py_BuildValue("s", "c"));
-      PyTuple_SetItem(t, 2, Py_BuildValue("(dd)", s->min_max[i].first,
-        s->min_max[i].second));
+      auto& quantiles = s->quantiles[i];
+      PyObject *py_quantiles = PyList_New(quantiles.size());
+      for (int j = 0; j < quantiles.size(); j++) {
+        PyList_SetItem(py_quantiles, j, Py_BuildValue("d", quantiles[j]));
+      }
+      PyTuple_SetItem(t, 2, py_quantiles);
     } else if (s->int_mappings.find(i) != s->int_mappings.end()) {
       PyTuple_SetItem(t, 1, Py_BuildValue("s", "i"));
       PyObject *vals = PyList_New(s->int_mappings[i].size());
